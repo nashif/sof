@@ -258,8 +258,7 @@ static void *alloc_cont_blocks(struct mm_heap *heap, int level,
 	/* check if we have enough consecutive blocks for requested
 	 * allocation size.
 	 */
-	for (current = map->first_free; current < map->count ||
-	     count > remaining; current++) {
+	for (current = map->first_free; current < map->count; current++) {
 		hdr = &map->block[current];
 
 		if (!hdr->used)
@@ -472,7 +471,8 @@ void alloc_trace_runtime_heap(int zone, uint32_t caps, size_t bytes)
 	/* check runtime heap for capabilities */
 	trace_mem_error("heap: using runtime");
 	do {
-		heap = get_runtime_heap_from_caps(caps, current);
+		heap = get_heap_from_caps(memmap.runtime, PLATFORM_HEAP_RUNTIME,
+					  caps);
 		if (heap) {
 			trace_heap_blocks(heap);
 			count++;
@@ -494,7 +494,8 @@ void alloc_trace_buffer_heap(int zone, uint32_t caps, size_t bytes)
 	/* check buffer heap for capabilities */
 	trace_mem_error("heap: using buffer");
 	do {
-		heap = get_buffer_heap_from_caps(caps, current);
+		heap = get_heap_from_caps(memmap.buffer, PLATFORM_HEAP_BUFFER,
+					  caps);
 		if (heap) {
 			trace_heap_blocks(heap);
 			count++;

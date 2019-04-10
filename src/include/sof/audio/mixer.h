@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Intel Corporation
+ * Copyright (c) 2019, Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,26 +25,14 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Tomasz Lauda <tomasz.lauda@linux.intel.com>
+ * Author: Janusz Jankowski <janusz.jankowski@linux.intel.com>
  */
 
-#ifndef __INCLUDE_CLOCK_MAP__
-#define __INCLUDE_CLOCK_MAP__
+#ifndef __INCLUDE_AUDIO_MIXER_H__
+#define __INCLUDE_AUDIO_MIXER_H__
 
-#include <sof/clk.h>
-
-static const struct freq_table cpu_freq[] = {
-	{120000000, 120000, 0x0},
-	{400000000, 400000, 0x4}, /* default */
-};
-
-/* IMPORTANT: array should be filled in increasing order
- * (regarding to .freq field)
- */
-static const struct freq_table ssp_freq[] = {
-	{ 24576000, 24576, CLOCK_SSP_AUDIO_CARDINAL },
-	{ 38400000, 38400, CLOCK_SSP_XTAL_OSCILLATOR },
-	{ 96000000, 96000, CLOCK_SSP_PLL_FIXED },
-};
+#ifdef UNIT_TEST
+void sys_comp_mixer_init(void);
+#endif
 
 #endif

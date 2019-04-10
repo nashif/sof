@@ -92,9 +92,7 @@
 
 #define HDA_DMA_MAX_CHANS		9
 
-#define HDA_STATE_HOST_PRELOAD	BIT(0)
-#define HDA_STATE_INIT		BIT(1)
-#define HDA_STATE_RELEASE	BIT(2)
+#define HDA_STATE_RELEASE	BIT(0)
 
 /*
  * DMA Pointer Trace
@@ -268,40 +266,37 @@ static void hda_dma_get_dbg_vals(struct hda_chan_data *chan,
 #define hda_dma_ptr_trace(...)
 #endif
 
-static int hda_dma_host_preload(struct dma *dma, struct hda_chan_data *chan)
+static int hda_dma_wait_for_buffer_full(struct dma *dma,
+					struct hda_chan_data *chan)
 {
-	struct dma_sg_elem next = {
-			.src = DMA_RELOAD_LLI,
-			.dest = DMA_RELOAD_LLI,
-			.size = DMA_RELOAD_LLI
-	};
-	int i;
-	int period_cnt;
-
 	uint64_t deadline = platform_timer_get(platform_timer) +
-			    clock_ms_to_ticks(PLATFORM_DEFAULT_CLOCK, 1) *
-					      PLATFORM_HOST_DMA_TIMEOUT / 1000;
+		clock_ms_to_ticks(PLATFORM_DEFAULT_CLOCK, 1) *
+		PLATFORM_HOST_DMA_TIMEOUT / 1000;
 
-	/* waiting for buffer full after start
-	 * first try is unblocking, then blocking
-	 */
 	while (!(host_dma_reg_read(dma, chan->index, DGCS) & DGCS_BF)) {
 		if (deadline < platform_timer_get(platform_timer)) {
-			trace_hddma_error("hda-dmac: %d preload timeout",
-					  dma->plat_data.id);
+			trace_hddma_error("hda-dmac: %d wait for buffer full "
+					  "timeout", dma->plat_data.id);
 			return -ETIME;
 		}
 	}
 
-	chan->state &= ~HDA_STATE_HOST_PRELOAD;
-	if (chan->cb) {
-		/* loop over each period */
-		period_cnt = chan->buffer_bytes / chan->period_bytes;
-		for (i = 0; i < period_cnt; i++) {
-			next.size = chan->period_bytes;
-			chan->cb(chan->cb_data, DMA_CB_TYPE_LLIST, &next);
+	return 0;
+}
+
+static int hda_dma_wait_for_buffer_empty(struct dma *dma,
+					 struct hda_chan_data *chan)
+{
+	uint64_t deadline = platform_timer_get(platform_timer) +
+		clock_ms_to_ticks(PLATFORM_DEFAULT_CLOCK, 1) *
+		PLATFORM_HOST_DMA_TIMEOUT / 1000;
+
+	while (host_dma_reg_read(dma, chan->index, DGCS) & DGCS_BNE) {
+		if (deadline < platform_timer_get(platform_timer)) {
+			trace_hddma_error("hda-dmac: %d wait for buffer empty "
+					  "timeout", dma->plat_data.id);
+			return -ETIME;
 		}
-		/* do not need to test out next in this path */
 	}
 
 	return 0;
@@ -359,28 +354,6 @@ static int hda_dma_link_copy_ch(struct dma *dma, struct hda_chan_data *chan,
 	return ret;
 }
 
-static int hda_dma_host_copy_ch(struct dma *dma, struct hda_chan_data *chan,
-				int bytes)
-{
-	tracev_hddma("hda-dmac: %d channel %d -> copy 0x%x bytes",
-		     dma->plat_data.id, chan->index, bytes);
-
-	/*
-	 * set BFPI to let host gateway know we have read size,
-	 * which will trigger next copy start.
-	 */
-
-	hda_dma_get_dbg_vals(chan, HDA_DBG_PRE, HDA_DBG_HOST);
-
-	hda_dma_inc_fp(dma, chan->index, bytes);
-	hda_dma_post_copy(dma, chan, bytes);
-
-	hda_dma_get_dbg_vals(chan, HDA_DBG_POST, HDA_DBG_HOST);
-	hda_dma_ptr_trace(chan, "host copy", HDA_DBG_HOST);
-
-	return 0;
-}
-
 /* lock should be held by caller */
 static void hda_dma_enable_unlock(struct dma *dma, int channel)
 {
@@ -415,7 +388,7 @@ static void hda_dma_enable_unlock(struct dma *dma, int channel)
 		hda_dma_inc_link_fp(dma, channel,
 				    p->chan[channel].buffer_bytes);
 
-	p->chan[channel].state &= ~(HDA_STATE_INIT | HDA_STATE_RELEASE);
+	p->chan[channel].state &= ~HDA_STATE_RELEASE;
 
 	hda_dma_get_dbg_vals(&p->chan[channel], HDA_DBG_POST, HDA_DBG_BOTH);
 	hda_dma_ptr_trace(&p->chan[channel], "enable", HDA_DBG_BOTH);
@@ -428,12 +401,7 @@ static int hda_dma_link_copy(struct dma *dma, int channel, int bytes,
 	struct dma_pdata *p = dma_get_drvdata(dma);
 	struct hda_chan_data *chan = p->chan + channel;
 
-	if (chan->state & HDA_STATE_INIT)
-		return 0;
-	else
-		return hda_dma_link_copy_ch(dma, chan, bytes);
-
-	return 0;
+	return hda_dma_link_copy_ch(dma, chan, bytes);
 }
 
 /* notify DMA to copy bytes */
@@ -442,6 +410,10 @@ static int hda_dma_host_copy(struct dma *dma, int channel, int bytes,
 {
 	struct dma_pdata *p = dma_get_drvdata(dma);
 	struct hda_chan_data *chan = p->chan + channel;
+	int ret;
+
+	tracev_hddma("hda-dmac: %d channel %d -> copy 0x%x bytes",
+		     dma->plat_data.id, chan->index, bytes);
 
 	if (channel >= HDA_DMA_MAX_CHANS) {
 		trace_hddma_error("hda-dmac: %d invalid channel %d",
@@ -449,15 +421,27 @@ static int hda_dma_host_copy(struct dma *dma, int channel, int bytes,
 		return -EINVAL;
 	}
 
-	if (flags & DMA_COPY_PRELOAD)
-		chan->state |= HDA_STATE_HOST_PRELOAD;
+	hda_dma_get_dbg_vals(chan, HDA_DBG_PRE, HDA_DBG_HOST);
 
-	if (chan->state & HDA_STATE_INIT)
-		return 0;
-	else if (chan->state & HDA_STATE_HOST_PRELOAD)
-		return hda_dma_host_preload(dma, chan);
-	else
-		return hda_dma_host_copy_ch(dma, chan, bytes);
+	if (!(flags & DMA_COPY_PRELOAD))
+		/* set BFPI to let host gateway know we have read size,
+		 * which will trigger next copy start.
+		 */
+		hda_dma_inc_fp(dma, chan->index, bytes);
+
+	/* blocking mode copy */
+	if (flags & DMA_COPY_BLOCKING) {
+		ret = chan->direction == DMA_DIR_HMEM_TO_LMEM ?
+			hda_dma_wait_for_buffer_full(dma, chan) :
+			hda_dma_wait_for_buffer_empty(dma, chan);
+		if (ret < 0)
+			return ret;
+	}
+
+	hda_dma_post_copy(dma, chan, bytes);
+
+	hda_dma_get_dbg_vals(chan, HDA_DBG_POST, HDA_DBG_HOST);
+	hda_dma_ptr_trace(chan, "host copy", HDA_DBG_HOST);
 
 	return 0;
 }
@@ -560,8 +544,6 @@ static int hda_dma_start(struct dma *dma, int channel)
 				  p->chan[channel].status);
 		goto out;
 	}
-
-	p->chan[channel].state |= HDA_STATE_INIT;
 
 	hda_dma_enable_unlock(dma, channel);
 

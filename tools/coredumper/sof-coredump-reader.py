@@ -11,7 +11,6 @@ import sys
 import itertools
 import re
 import shutil
-import fcntl
 import time
 from ctypes      import LittleEndianStructure, BigEndianStructure, c_uint32, c_char
 from collections import namedtuple
@@ -20,6 +19,9 @@ from functools   import partial
 
 def stderr_print(*args, **kwargs):
 	print(*args, file=sys.stderr, **kwargs)
+
+def stdout_print(*args, **kwargs):
+	print(*args, file=sys.stdout, **kwargs)
 
 try:
 	from sty import fg, bg, ef, rs, Rule, Render
@@ -179,12 +181,10 @@ def parse_params():
 					},),
 				( ( '-l', '--columncount', ), {
 						'type'  : int,
-						'help'  :'set how many colums to group the output in',
+						'help'  :'set how many colums to group the output in, ignored without -v',
 						'action':'store',
 						'nargs' : 1,
 					},),
-			# below makes it impossible to have input file while getting stdin from pipe
-			] + ([] if not sys.stdin.isatty() else [
 				( ( '-i', '--infile'     , ), {
 						'type'   : str,
 						'help'   :'path to sys dump bin',
@@ -192,14 +192,15 @@ def parse_params():
 						'nargs'  : 1,
 					},
 					inputMethod),
-			])],
+			]],
 			key=lambda argtup: (argtup.parent.__hash__(), argtup.name)
 		)
 	]
 
 	parsed = parser.parse_args()
-	if not sys.stdin.isatty():
-		parsed.stdin = True
+
+	if parsed.columncount and not parsed.verbose:
+		stderr_print("INFO: -l option will be ignored without -v")
 
 	return parsed
 
@@ -226,6 +227,8 @@ def FileInfoFactory(arch, filename_length):
 	raiseIfArchNotValid(arch)
 	class FileInfo(arch.endianness):
 		_fields_ = [
+			("hdr",  c_uint32),
+			("code",  c_uint32),
 			("filename", filename_length * c_char),
 			("line_no",  c_uint32)
 		]
@@ -242,7 +245,7 @@ class Colourer():
 	#TODO: Add detection of 8bit/24bit terminal
 	#      Add 8bit/24bit colours (with flag, maybe --colour=24bit)
 	#      Use this below as fallback only
-	__print = partial(stderr_print)
+	__print = partial(stdout_print)
 	if CAN_COLOUR == True:
 		__style = {
 			'o' : fg.red,
@@ -271,12 +274,6 @@ class Colourer():
 				),
 				(
 					r'\1' +
-					r'\2' +
-					self.enstyle(           fg.green , r'\3') ,
-					re.compile(r'(\|)(ar)([0-9]+)\b')
-				),
-				(
-					self.enstyle(bg.green + fg.black , r'\1') +
 					r'\2' +
 					self.enstyle(           fg.green , r'\3') ,
 					re.compile(r'(\#)(ar)([0-9]+)\b')
@@ -441,6 +438,7 @@ def CoreDumpFactory(dsp_arch):
 					"configidlo",
 					"numaregs",
 					"stackoffset",
+					"stackptr",
 					# }
 					"exccause",
 					"excvaddr",
@@ -460,6 +458,8 @@ def CoreDumpFactory(dsp_arch):
 				]
 			] + [
 				("a", dsp_arch.bitness * c_uint32)
+			] + [
+				("stack", c_uint32)
 			]
 
 		def __init__(self, columncount):
@@ -509,8 +509,17 @@ def CoreDumpFactory(dsp_arch):
 			string = ''.join([self.fmt(is_gdb, x)
 				for x in flaten(
 					[chunks(word, self.columncount) for word in [
-						["arch", "totalsize", "stackoffset"],
+						["arch", "totalsize", "stackptr", "stackoffset"],
 						["configidhi", "configidlo", "numaregs"],
+					]]
+				)
+			])
+
+			string += "\n# CPU registers:\n\n"
+
+			string += ''.join([self.fmt(is_gdb, x)
+				for x in flaten(
+					[chunks(word, self.columncount) for word in [
 						["exccause", "excvaddr", "ps"],
 						["epc" + str(x) for x in range(1,7+1)],
 						["eps" + str(x) for x in range(2,7+1)],
@@ -526,6 +535,7 @@ def CoreDumpFactory(dsp_arch):
 					]]
 				)
 			])
+
 			if not is_gdb:
 				string += "\n"
 			return string
@@ -537,10 +547,7 @@ def CoreDumpFactory(dsp_arch):
 			return separator + "{:" + str(self._longest_field) + "} {:08x} "
 
 		def fmt_separator(self, name):
-			separator = "|"
-			if self.ar_regex.fullmatch(name):
-				if int(name[2:]) % AR_WINDOW_WIDTH == 0:
-					separator = "#"
+			separator = "# "
 			return separator
 
 		def fmt_pretty_auto(self, name):
@@ -563,28 +570,49 @@ def CoreDumpFactory(dsp_arch):
 
 		def windowstart_process(self):
 			string = ""
-			binary = "b{0:b}".format(self.windowstart)
+			binary = "{0:b}".format(self.windowstart)
+			bit_start = len(binary)-1-self.windowbase
 			fnc_num = 0
-			header = " "
-			for it, c in enumerate(binary[1:]):
+			header = ""
+
+			for it, c in enumerate(binary[bit_start:]):
 				if c != "0":
-					header  += str(fnc_num)
+					header += str(fnc_num)
 					fnc_num += 1
 				else:
 					header += " "
-			string += "             {0}\n".format(header)
-			string += "windowstart: {0}\n".format(binary)
+			for it, c in enumerate(binary[:bit_start]):
+				if c != "0":
+					header += str(fnc_num)
+					fnc_num += 1
+				else:
+					header += " "
+			header = header[self.windowbase+1:]+ header[:self.windowbase+1]
 
+			string += "# windowbase: {:0X}\n".format(self.windowbase)
+			string += "#               {0}\n".format(header)
+			string += "# windowstart: b{0}\n\n".format(binary)
+			string += "#      reg         a0         a1\n"
+			string += "#                  (return)   (sptr)\n"
+			string += "#      ---         --------   -------\n"
 			fnc_num = 0
-			for iter, digit in enumerate(binary[1:]):
+			for iter, digit in enumerate(binary[bit_start:]):
 				if (digit == '1'):
-					reg = "ar{0}".format(
-						self.windowbase_shift_right(AR_WINDOW_WIDTH * -iter)
-					)
-					string  += "{0:2d} ".format(++fnc_num)
-					string  += self.fmt_pretty_auto(reg).format(
+					reg = "ar{0}".format(AR_WINDOW_WIDTH * (self.windowbase - iter))
+					reg1 = "ar{0}".format(AR_WINDOW_WIDTH * (self.windowbase - iter) + 1)
+					string += "# {0:2d} ".format(++fnc_num)
+					string += self.fmt_pretty_auto(reg).format(
 						reg, self.reg_from_string(reg)
-					) + "\n"
+					) + "  {:0x} ".format(self.reg_from_string(reg1)) + "\n"
+					fnc_num += 1
+			for iter, digit in enumerate(binary[:bit_start]):
+				if (digit == '1'):
+					reg = "ar{0}".format(AR_WINDOW_WIDTH * (len(binary) - 1 - iter))
+					reg1 = "ar{0}".format(AR_WINDOW_WIDTH * (len(binary) - 1 - iter) + 1)
+					string += "# {0:2d} ".format(++fnc_num)
+					string += self.fmt_pretty_auto(reg).format(
+						reg, self.reg_from_string(reg)
+					) + "  {:0x} ".format(self.reg_from_string(reg1)) + "\n"
 					fnc_num += 1
 			return string
 
@@ -608,7 +636,7 @@ class CoreDumpReader(object):
 			verbosePrint =\
 					colourer.print\
 				if IS_COLOUR else\
-					stderr_print
+					stdout_print
 		else:
 			verbosePrint = lambda *discard_this: None
 
@@ -625,7 +653,7 @@ class CoreDumpReader(object):
 		else:
 			raise RuntimeError("CoreDumpReader: No output method.") 
 
-		if   args.stdin or not sys.stdin.isatty():
+		if   args.stdin:
 			inStream = lambda: sys.stdin.buffer
 		elif args.infile:
 			inStream = lambda: open(args.infile, "rb")
@@ -639,14 +667,15 @@ class CoreDumpReader(object):
 			]]
 			self.stack = cd_file.read()
 
+		verbosePrint("# Core header:\n")
 		verbosePrint(self.core_dump.to_string(0))
 
 		verbosePrint(self.core_dump.windowstart_process())
 
-		verbosePrint("Location: " + str(self.file_info));
-		stack_base = self.core_dump.a[1] + 16
+		verbosePrint("# Location: " + str(self.file_info));
+		stack_base = self.core_dump.stackptr
 		stack_dw_num = int(len(self.stack)/AR_WINDOW_WIDTH)
-		verbosePrint("Stack dumped from {:08x} dwords num {:d}"
+		verbosePrint("# Stack dumped from {:08x} dwords num {:d}"
 			.format(stack_base, stack_dw_num))
 
 		stdoutOpen()
@@ -663,8 +692,6 @@ class CoreDumpReader(object):
 
 		# TODO: if excsave1 is not empty, pc should be set to that value
 		# (exception mode, not forced panic mode)
-			# dodac sobie przyklad
-			# ustawiac pc z
 		stdoutPrint("set $pc=&arch_dump_regs_a\nbacktrace\n")
 		stdoutClose()
 
@@ -674,6 +701,6 @@ if __name__ == "__main__":
 		if CAN_COLOUR:
 			IS_COLOUR=True
 		else:
-			stderr_print("Cannot color the output: module 'sty' not found!")
+			stderr_print("INFO: Cannot color the output: module 'sty' not found")
 	CoreDumpReader(args)
 

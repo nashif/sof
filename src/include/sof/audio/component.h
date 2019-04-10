@@ -146,12 +146,22 @@
 #define COMP_STATUS_STATE_ALREADY_SET	1	/**< Comp set state status */
 /** @}*/
 
+/** \name Component attribute types
+ *  @{
+ */
+#define COMP_ATTR_COPY_BLOCKING	0	/**< Comp blocking copy attribute */
+/** @}*/
+
 /** \name Declare component macro
  *  \brief Usage at the end of comp file: DECLARE_COMPONENT(sys_comp_*_init);
  *  @{
  */
 #ifdef UNIT_TEST
 #define DECLARE_COMPONENT(init)
+#elif CONFIG_HOST
+/* In case of shared libs components are initialised in dlopen */
+#define DECLARE_COMPONENT(init) __attribute__((constructor)) \
+	static void _comp_init(void) { init(); }
 #else
 #define DECLARE_COMPONENT(init) __attribute__((__used__)) \
 	__attribute__((section(".comp_init"))) static void(*f)(void) = init
@@ -217,6 +227,10 @@ struct comp_ops {
 
 	/** cache operation on component data */
 	void (*cache)(struct comp_dev *dev, int cmd);
+
+	/** set attribute in component */
+	int (*set_attribute)(struct comp_dev *dev, uint32_t type,
+			     uint32_t value);
 };
 
 
@@ -520,6 +534,21 @@ static inline void comp_cache(struct comp_dev *dev, int cmd)
 {
 	if (dev->drv->ops.cache)
 		dev->drv->ops.cache(dev, cmd);
+}
+
+/**
+ * Sets component attribute.
+ * @param dev Component device.
+ * @param type Attribute type.
+ * @param type Attribute value.
+ * @return 0 if succeeded, error code otherwise.
+ */
+static inline int comp_set_attribute(struct comp_dev *dev, uint32_t type,
+				     uint32_t value)
+{
+	if (dev->drv->ops.set_attribute)
+		return dev->drv->ops.set_attribute(dev, type, value);
+	return 0;
 }
 
 /** @}*/

@@ -53,7 +53,7 @@ struct shared_lib_table *lib_table;
 static void register_comp(int comp_type)
 {
 	int index;
-	char message[DEBUG_MSG_LEN];
+	char message[DEBUG_MSG_LEN + MAX_LIB_NAME_LEN];
 
 	/* register file comp driver (no shared library needed) */
 	if (comp_type == SND_SOC_TPLG_DAPM_DAI_IN ||
@@ -77,11 +77,19 @@ static void register_comp(int comp_type)
 			lib_table[index].comp_name);
 		debug_print(message);
 
-		/* register comp driver */
-		void (*comp_init)() =
-			(void (*)(void))dlsym(lib_table[index].handle,
-					      lib_table[index].comp_init);
-		comp_init();
+		/* open shared library object */
+		sprintf(message, "opening shared lib %s\n",
+			lib_table[index].library_name);
+		debug_print(message);
+
+		lib_table[index].handle = dlopen(lib_table[index].library_name,
+						 RTLD_LAZY);
+		if (!lib_table[index].handle) {
+			fprintf(stderr, "error: %s\n", dlerror());
+			exit(EXIT_FAILURE);
+		}
+
+		/* comp init is executed on lib load */
 		lib_table[index].register_drv = 1;
 	}
 
@@ -828,11 +836,13 @@ int parse_topology(struct sof *sof, struct shared_lib_table *library_table,
 			sprintf(message, "number of DAPM widgets %d\n",
 				hdr->count);
 			debug_print(message);
-			size = sizeof(struct comp_info) * hdr->count;
-			temp_comp_list = (struct comp_info *)malloc(size);
-			num_comps = hdr->count;
 
-			for (i = 0; i < hdr->count; i++)
+			num_comps += hdr->count;
+			size = sizeof(struct comp_info) * num_comps;
+			temp_comp_list = (struct comp_info *)
+					 realloc(temp_comp_list, size);
+
+			for (i = (num_comps - hdr->count); i < num_comps; i++)
 				load_widget(sof, fr_id, fw_id, sched_id,
 					    temp_comp_list,
 					    &pipeline, next_comp_id++,

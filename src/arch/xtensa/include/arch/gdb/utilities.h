@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Intel Corporation
+ * Copyright (c) 2019, Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,26 +25,14 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Tomasz Lauda <tomasz.lauda@linux.intel.com>
+ * Author: Marcin Rajwa <marcin.rajwa@linux.intel.com>
+ *
+ * Header file for Xtensa-GDB utilities.
+ *
  */
 
-#ifndef __INCLUDE_CLOCK_MAP__
-#define __INCLUDE_CLOCK_MAP__
-
-#include <sof/clk.h>
-
-static const struct freq_table cpu_freq[] = {
-	{120000000, 120000, 0x0},
-	{400000000, 400000, 0x4}, /* default */
-};
-
-/* IMPORTANT: array should be filled in increasing order
- * (regarding to .freq field)
- */
-static const struct freq_table ssp_freq[] = {
-	{ 24576000, 24576, CLOCK_SSP_AUDIO_CARDINAL },
-	{ 38400000, 38400, CLOCK_SSP_XTAL_OSCILLATOR },
-	{ 96000000, 96000, CLOCK_SSP_PLL_FIXED },
-};
-
-#endif
+void arch_gdb_read_sr(int sr);
+void arch_gdb_write_sr(int sr, int *sregs);
+unsigned char arch_gdb_load_from_memory(void *mem);
+void arch_gdb_memory_load_and_store(void *mem, unsigned char ch);
+void arch_gdb_single_step(int *sregs);
