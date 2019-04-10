@@ -60,7 +60,8 @@
 
 // TODO get from driver.
 #define BYT_PANIC_OFFSET(x)	(x)
-//pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
 struct byt_data {
 	void *bar[MAX_BAR_COUNT];
@@ -210,15 +211,15 @@ static uint64_t dsp_update_bits64_unlocked(struct fuzz *fuzzer,
 	return 1;
 }
 
-static void mailbox_read(struct fuzz *fuzzer, unsigned offset,
-		void *mbox_data, unsigned size)
+static void mailbox_read(struct fuzz *fuzzer, unsigned int offset,
+		void *mbox_data, unsigned int size)
 {
 	struct byt_data *data = fuzzer->platform_data;
 
 	memcpy(mbox_data, (void*)(data->bar[BYT_MBOX_BAR] + offset), size);
 }
 
-static void mailbox_write(struct fuzz *fuzzer, unsigned offset,
+static void mailbox_write(struct fuzz *fuzzer, unsigned int offset,
 		void *mbox_data, unsigned size)
 {
 	struct byt_data *data = fuzzer->platform_data;
@@ -308,21 +309,23 @@ static int byt_irq_thread(int irq, void *context)
 						   SHIM_IMRX_BUSY,
 						   SHIM_IMRX_BUSY);
 
-		/* boot not complete ?? - TODO check message dont just assume */
-		if (!data->boot_complete) {
-			/* use a mutex here to wake init code */
+		/* read mailbox */
+		fuzzer_ipc_msg_rx(fuzzer);
+
+		if (!data->boot_complete && fuzzer->boot_complete) {
 			data->boot_complete = 1;
+			pthread_cond_signal(&cond);
 			pthread_mutex_unlock(&data->mutex);
 			return IRQ_HANDLED;
 		}
 
+#if 0
 		/* Handle messages from DSP Core */
 		if ((ipcd & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC) {
 			fuzzer_ipc_crash(fuzzer, BYT_PANIC_OFFSET(ipcd) +
 					  MBOX_OFFSET);
-		} else {
-			fuzzer_ipc_msg_rx(fuzzer);
 		}
+#endif
 	}
 
 	return IRQ_HANDLED;
@@ -420,7 +423,6 @@ static int byt_platform_init(struct fuzz *fuzzer,
 					  "byt", "-k",
 					  "../../../build_byt_gcc/sof-byt.ri",
 					  "-o", "2.0", "byt-dump.txt", NULL};
-	pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 	int i, bar;
 	int ret;
 
@@ -491,6 +493,8 @@ struct fuzz_platform byt_platform = {
 	.get_reply = byt_get_reply,
 	.init = byt_platform_init,
 	.free = byt_platform_free,
+	.mailbox_read = mailbox_read,
+	.mailbox_write = mailbox_write,
 	.num_mem_regions = ARRAY_SIZE(byt_mem),
 	.mem_region = byt_mem,
 	.num_reg_regions = ARRAY_SIZE(byt_io),
@@ -503,6 +507,8 @@ struct fuzz_platform cht_platform = {
 	.get_reply = byt_get_reply,
 	.init = byt_platform_init,
 	.free = byt_platform_free,
+	.mailbox_read = mailbox_read,
+	.mailbox_write = mailbox_write,
 	.num_mem_regions = ARRAY_SIZE(byt_mem),
 	.mem_region = byt_mem,
 	.num_reg_regions = ARRAY_SIZE(byt_io),

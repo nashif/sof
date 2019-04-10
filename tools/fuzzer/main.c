@@ -130,12 +130,19 @@ void fuzzer_free_regions(struct fuzz *fuzzer)
 /* called by platform when it receives IPC message */
 void fuzzer_ipc_msg_rx(struct fuzz *fuzzer)
 {
-	struct ipc_msg msg;
+	struct sof_ipc_cmd_hdr hdr;
+	uint32_t cmd;
 
-	/* TODO: we have received a notification from DSP FW */
-	fuzzer->platform->get_reply(fuzzer, &msg);
+	/* read mailbox */
+	fuzzer->platform->mailbox_read(fuzzer, 0, &hdr, sizeof(hdr));
 
-	ipc_dump(fuzzer, &msg);
+	cmd = hdr.cmd & SOF_GLB_TYPE_MASK;
+	if (cmd == SOF_IPC_FW_READY) {
+		fuzzer->boot_complete = 1;
+		/* TODO: print ABI version */
+	}
+
+	/* TODO: handle other ipc messages */
 }
 
 /* called by platform when it receives IPC message reply */
@@ -233,6 +240,8 @@ found:
 				platform_name);
 		exit(EXIT_FAILURE);
 	}
+
+	fprintf(stdout, "FW boot complete\n");
 
 	/* send test message */
 	fuzzer_ipc_msg_tx(&fuzzer);
