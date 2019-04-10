@@ -70,7 +70,7 @@ static void ipc_dump(struct fuzz *fuzzer, struct ipc_msg *msg)
 			msg->header, msg->msg_size, msg->reply_size);
 }
 
-void *fuzzer_create_io_region(struct fuzz *fuzzer, int idx)
+void *fuzzer_create_io_region(struct fuzz *fuzzer, int id, int idx)
 {
 	struct fuzz_platform *plat = fuzzer->platform;
 	struct fuzzer_reg_space *space;
@@ -82,16 +82,16 @@ void *fuzzer_create_io_region(struct fuzz *fuzzer, int idx)
 
 	sprintf(shm_name, "%s-io", space->name);
 
-	err = qemu_io_register_shm(shm_name, idx,
+	err = qemu_io_register_shm(shm_name, id,
 			space->desc.size, &ptr);
 	if (err < 0)
 		fprintf(stderr, "error: can't allocate IO %s:%d SHM %d\n", shm_name,
-				idx, err);
+				id, err);
 
 	return ptr;
 }
 
-void *fuzzer_create_memory_region(struct fuzz *fuzzer, int idx)
+void *fuzzer_create_memory_region(struct fuzz *fuzzer, int id, int idx)
 {
 	struct fuzz_platform *plat = fuzzer->platform;
 	struct fuzzer_mem_desc *desc;
@@ -103,11 +103,11 @@ void *fuzzer_create_memory_region(struct fuzz *fuzzer, int idx)
 
 	/* shared via SHM (not shared on real HW) */
 	sprintf(shm_name, "%s-mem", desc->name);
-	err = qemu_io_register_shm(shm_name, idx,
+	err = qemu_io_register_shm(shm_name, id,
 		desc->size, &ptr);
 	if (err < 0)
 		fprintf(stderr, "error: can't allocate %s:%d SHM %d\n", shm_name,
-				idx, err);
+				id, err);
 
 	return ptr;
 }

@@ -93,7 +93,7 @@ static gpointer parent_reader_thread(gpointer data)
     if (io_bridge_debug)
         fprintf(stdout, "bridge-io: %d messages are currently on parent queue.\n",
             (int)io->parent.mqattr.mq_curmsgs);
-
+#if 0
     /* flush old messages here */
     for (i = 0; i < io->parent.mqattr.mq_curmsgs; i++) {
         mq_receive(io->parent.mqdes, buf, QEMU_IO_MAX_MSG_SIZE, NULL);
@@ -103,7 +103,7 @@ static gpointer parent_reader_thread(gpointer data)
             fprintf(stdout, "bridge-io: flushed %d type %d size %d msg %d\n",
                 hdr->id, hdr->type, hdr->size, hdr->msg);
     }
-
+#endif
     while (mq_receive(io->parent.mqdes, buf, QEMU_IO_MAX_MSG_SIZE, NULL) != -1) {
         struct qemu_io_msg *hdr = (struct qemu_io_msg*)buf;
 

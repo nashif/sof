@@ -33,7 +33,6 @@
 #include "../fuzzer.h"
 #include "../qemu-bridge.h"
 
-#define BYT_DSP_BAR	0
 #define MBOX_OFFSET		0x144000
 
 /* Baytrail, Cherrytrail and Braswell - taken from qemu */
@@ -71,7 +70,7 @@ struct byt_data {
 	pthread_mutex_t mutex;
 };
 
-/* Platform host description taken from Qemu */
+/* Platform host description taken from Qemu  - mapped to BAR 0, 1*/
 static struct fuzzer_mem_desc byt_mem[] = {
     {.name = "iram", .base = ADSP_BYT_HOST_IRAM_BASE,
         .size = ADSP_BYT_IRAM_SIZE},
@@ -79,14 +78,18 @@ static struct fuzzer_mem_desc byt_mem[] = {
         .size = ADSP_BYT_DRAM_SIZE},
 };
 
+/* mapped to BAR 2, 3 */
 static struct fuzzer_reg_space byt_io[] = {
-    { .name = "pci",
-        .desc = {.base = ADSP_BYT_PCI_BASE, .size = ADSP_PCI_SIZE},},
+   /* { .name = "pci",
+        .desc = {.base = ADSP_BYT_PCI_BASE, .size = ADSP_PCI_SIZE},}, */
     { .name = "shim",
         .desc = {.base = ADSP_BYT_HOST_SHIM_BASE, .size = ADSP_BYT_SHIM_SIZE},},
     { .name = "mbox",
         .desc = {.base = ADSP_BYT_HOST_MAILBOX_BASE, .size = ADSP_MAILBOX_SIZE},},
 };
+
+#define BYT_DSP_BAR	2
+#define BYT_MBOX_BAR	3
 
 /*
  * Platform support for BYT/CHT.
@@ -212,7 +215,7 @@ static void mailbox_read(struct fuzz *fuzzer, unsigned offset,
 {
 	struct byt_data *data = fuzzer->platform_data;
 
-	memcpy(mbox_data, (void*)(data->bar[0] + offset), size);
+	memcpy(mbox_data, (void*)(data->bar[BYT_MBOX_BAR] + offset), size);
 }
 
 static void mailbox_write(struct fuzz *fuzzer, unsigned offset,
@@ -220,7 +223,7 @@ static void mailbox_write(struct fuzz *fuzzer, unsigned offset,
 {
 	struct byt_data *data = fuzzer->platform_data;
 
-	memcpy((void*)(data->bar[0] + offset), mbox_data, size);
+	memcpy((void*)(data->bar[BYT_MBOX_BAR] + offset), mbox_data, size);
 }
 
 static int byt_cmd_done(struct fuzz *fuzzer, int dir)
@@ -257,12 +260,12 @@ static int byt_irq_handler(int irq, void *context)
 	struct fuzz *fuzzer = (struct fuzz *)context;
 	uint64_t isr;
 	int ret = IRQ_NONE;
-
+printf("in %s\n", __func__);
 	/* Interrupt arrived, check src */
 	isr = dsp_read64(fuzzer, BYT_DSP_BAR, SHIM_ISRX);
 	if (isr & (SHIM_ISRX_DONE | SHIM_ISRX_BUSY))
 		ret = IRQ_WAKE_THREAD;
-
+printf("%s isr 0x%lx\n", __func__, isr);
 	return ret;
 }
 
@@ -402,7 +405,7 @@ static int bridge_cb(void *data, struct qemu_io_msg *msg)
     default:
         break;
     }
-
+printf("%s done\n", __func__);
     return 0;
 }
 
@@ -418,7 +421,7 @@ static int byt_platform_init(struct fuzz *fuzzer,
 					  "../../../build_byt_gcc/sof-byt.ri",
 					  "-o", "2.0", "byt-dump.txt", NULL};
 	pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-	int i;
+	int i, bar;
 	int ret;
 
 	/* init private data */
@@ -430,18 +433,18 @@ static int byt_platform_init(struct fuzz *fuzzer,
 
 	/* create SHM for memories and register regions */
 	/* TODO: SHM index should match with qemu index numbers for same regions ?? */
-	for (i = 0; i < platform->num_mem_regions; i++) {
-		data->bar[i] = fuzzer_create_memory_region(fuzzer, i);
-		if (!data->bar[i]) {
+	for (i = 0, bar = 0; i < platform->num_mem_regions; i++, bar++) {
+		data->bar[bar] = fuzzer_create_memory_region(fuzzer, bar, i);
+		if (!data->bar[bar]) {
 			fprintf(stderr, "error: failed to create mem region %s\n",
 					platform->mem_region[i].name);
 			return -ENOMEM;
 		}
 	}
 
-	for (; i < platform->num_reg_regions; i++) {
-		data->bar[i] = fuzzer_create_io_region(fuzzer, i);
-		if (!data->bar[i]) {
+	for (i = 0; i < platform->num_reg_regions; i++, bar++) {
+		data->bar[bar] = fuzzer_create_io_region(fuzzer, bar, i);
+		if (!data->bar[bar]) {
 			fprintf(stderr, "error: failed to create mem region %s\n",
 					platform->reg_region[i].name);
 			return -ENOMEM;
@@ -451,7 +454,7 @@ static int byt_platform_init(struct fuzz *fuzzer,
 	/* initialise bridge to qemu */
 	qemu_io_register_parent(platform->name, &bridge_cb, (void*)fuzzer);
 
-	if (fork() == 0) {
+	if (0){//fork() == 0) {
 		/* child process starts qemu */
 		execv("/bin/bash", arguments);
 	} else {

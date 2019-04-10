@@ -127,8 +127,8 @@ void fuzzer_ipc_msg_reply(struct fuzz *fuzzer);
 void fuzzer_ipc_crash(struct fuzz *fuzzer, unsigned offset);
 
 /* called by platforms to allocate memory/register regions */
-void *fuzzer_create_memory_region(struct fuzz *fuzzer, int idx);
-void *fuzzer_create_io_region(struct fuzz *fuzzer, int idx);
+void *fuzzer_create_memory_region(struct fuzz *fuzzer, int id, int idx);
+void *fuzzer_create_io_region(struct fuzz *fuzzer, int id, int idx);
 void fuzzer_free_regions(struct fuzz *fuzzer);
 
 extern struct fuzz_platform byt_platform;
