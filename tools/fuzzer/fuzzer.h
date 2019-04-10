@@ -102,9 +102,9 @@ struct fuzz_platform {
 	int (*init)(struct fuzz *f, struct fuzz_platform *platform);
 	void (*free)(struct fuzz *f);
 	void (*mailbox_read)(struct fuzz *fuzzer, unsigned int offset,
-			  void *mbox_data, unsigned int size);
+			     void *mbox_data, unsigned int size);
 	void (*mailbox_write)(struct fuzz *fuzzer, unsigned int offset,
-			  void *mbox_data, unsigned int size);
+			      void *mbox_data, unsigned int size);
 
 	/* registers */
 	struct fuzzer_reg_space *reg_region;

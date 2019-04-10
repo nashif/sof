@@ -212,7 +212,7 @@ static uint64_t dsp_update_bits64_unlocked(struct fuzz *fuzzer,
 }
 
 static void mailbox_read(struct fuzz *fuzzer, unsigned int offset,
-		void *mbox_data, unsigned int size)
+			 void *mbox_data, unsigned int size)
 {
 	struct byt_data *data = fuzzer->platform_data;
 
@@ -220,7 +220,7 @@ static void mailbox_read(struct fuzz *fuzzer, unsigned int offset,
 }
 
 static void mailbox_write(struct fuzz *fuzzer, unsigned int offset,
-		void *mbox_data, unsigned size)
+			  void *mbox_data, unsigned int size)
 {
 	struct byt_data *data = fuzzer->platform_data;
 
