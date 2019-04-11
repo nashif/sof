@@ -105,6 +105,7 @@ struct fuzz_platform {
 			     void *mbox_data, unsigned int size);
 	void (*mailbox_write)(struct fuzz *fuzzer, unsigned int offset,
 			      void *mbox_data, unsigned int size);
+	void (*fw_ready)(struct fuzz *fuzzer);
 
 	/* registers */
 	struct fuzzer_reg_space *reg_region;

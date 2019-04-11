@@ -30,6 +30,7 @@
 #include <sys/time.h>
 #include "shim.h"
 #include <uapi/ipc/trace.h>
+#include <uapi/ipc/info.h>
 #include "../fuzzer.h"
 #include "../qemu-bridge.h"
 
@@ -487,6 +488,27 @@ static void byt_platform_free(struct fuzz *fuzzer)
 	free(data);
 }
 
+static void byt_fw_ready(struct fuzz *fuzzer)
+{
+	struct byt_data *data = fuzzer->platform_data;
+	struct sof_ipc_fw_ready fw_ready;
+	struct sof_ipc_fw_version version;
+	uint32_t offset = MBOX_OFFSET;
+
+	/* read fw_ready data from mailbox */
+	mailbox_read(fuzzer, 0, &fw_ready, sizeof(fw_ready));
+
+	/* init host_box and dsp_box */
+	data->host_box.offset = fw_ready.hostbox_offset;
+	data->host_box.size = fw_ready.hostbox_size;
+	data->dsp_box.offset = fw_ready.dspbox_offset;
+	data->dsp_box.size = fw_ready.hostbox_size;
+
+	version = fw_ready.version;
+	printf("FW version major: %d minor: %d tag: %s\n",
+	       version.major, version.minor, version.tag);
+}
+
 struct fuzz_platform byt_platform = {
 	.name = "byt",
 	.send_msg = byt_send_msg,
@@ -495,6 +517,7 @@ struct fuzz_platform byt_platform = {
 	.free = byt_platform_free,
 	.mailbox_read = mailbox_read,
 	.mailbox_write = mailbox_write,
+	.fw_ready = byt_fw_ready,
 	.num_mem_regions = ARRAY_SIZE(byt_mem),
 	.mem_region = byt_mem,
 	.num_reg_regions = ARRAY_SIZE(byt_io),

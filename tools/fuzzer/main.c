@@ -138,8 +138,8 @@ void fuzzer_ipc_msg_rx(struct fuzz *fuzzer)
 
 	cmd = hdr.cmd & SOF_GLB_TYPE_MASK;
 	if (cmd == SOF_IPC_FW_READY) {
+		fuzzer->platform->fw_ready(fuzzer);
 		fuzzer->boot_complete = 1;
-		/* TODO: print ABI version */
 	}
 
 	/* TODO: handle other ipc messages */
@@ -179,7 +179,6 @@ int fuzzer_ipc_msg_tx(struct fuzz *fuzzer)
 	fprintf(stdout, "sending message \n");
 	ipc_dump(fuzzer, &msg);
 
-	/* TODO: we have received a notification from DSP FW */
 	ret = fuzzer->platform->send_msg(fuzzer, &msg);
 	if (ret < 0) {
 		fprintf(stderr, "error: message tx failed\n");
