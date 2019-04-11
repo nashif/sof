@@ -35,6 +35,7 @@
 #include <unistd.h>
 #include <string.h>
 #include "fuzzer.h"
+#include <uapi/ipc/topology.h>
 #include "qemu-bridge.h"
 
 #include <uapi/ipc/trace.h>
@@ -130,19 +131,39 @@ void fuzzer_free_regions(struct fuzz *fuzzer)
 /* called by platform when it receives IPC message */
 void fuzzer_ipc_msg_rx(struct fuzz *fuzzer)
 {
+	struct sof_ipc_comp_reply r;
 	struct sof_ipc_cmd_hdr hdr;
 	uint32_t cmd;
 
+	printf("in %s\n", __func__);
 	/* read mailbox */
 	fuzzer->platform->mailbox_read(fuzzer, 0, &hdr, sizeof(hdr));
-
 	cmd = hdr.cmd & SOF_GLB_TYPE_MASK;
-	if (cmd == SOF_IPC_FW_READY) {
+	printf("cmd is 0x%x\n", cmd);
+
+	/* check message type */
+	switch (cmd) {
+	case SOF_IPC_GLB_REPLY:
+		fprintf(stderr, "error: ipc reply unknown\n");
+		break;
+	case SOF_IPC_FW_READY:
 		fuzzer->platform->fw_ready(fuzzer);
 		fuzzer->boot_complete = 1;
+		break;
+	case SOF_IPC_GLB_COMPOUND:
+	case SOF_IPC_GLB_TPLG_MSG:
+	case SOF_IPC_GLB_PM_MSG:
+	case SOF_IPC_GLB_COMP_MSG:
+	case SOF_IPC_GLB_STREAM_MSG:
+	case SOF_IPC_GLB_TRACE_MSG:
+		printf("cmd is 0x%x\n", cmd);
+		fuzzer->platform->mailbox_read(fuzzer, 0, &r, sizeof(r));
+		break;
+	default:
+		fprintf(stderr, "error: unknown DSP message 0x%x\n", cmd);
+		break;
 	}
 
-	/* TODO: handle other ipc messages */
 }
 
 /* called by platform when it receives IPC message reply */
@@ -165,18 +186,39 @@ void fuzzer_ipc_crash(struct fuzz *fuzzer, unsigned offset)
 /* TODO: this is hardcoded atm, needs to be able to send any message */
 int fuzzer_ipc_msg_tx(struct fuzz *fuzzer)
 {
+	struct sof_ipc_comp_volume *volume;
+	struct sof_ipc_comp_reply r;
 	struct ipc_msg msg;
 	int ret;
-	struct sof_ipc_dma_trace_params params;
 
+	struct sof_ipc_dma_trace_params params;
+#if 0
 	/* TODO: hard coded test message to enable trace */
 	msg.header = SOF_IPC_TRACE_DMA_PARAMS;
-	params.hdr.cmd = SOF_IPC_TRACE_DMA_PARAMS;
+	params.hdr.cmd = SOF_IPC_GLB_TRACE_MSG | SOF_IPC_TRACE_DMA_PARAMS;
 	params.hdr.size = sizeof(params);
-	msg.msg_data = &params;
-	msg.msg_size = sizeof(params);
+	params.stream_tag = 0;
+#endif
+	volume = (struct sof_ipc_comp_volume *)malloc(sizeof(*volume));
+	if (!volume)
+		return -ENOMEM;
 
-	fprintf(stdout, "sending message \n");
+	/* configure volume IPC message */
+	volume->comp.hdr.size = sizeof(*volume);
+	volume->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
+	volume->comp.id = 2;
+	volume->comp.type = SOF_COMP_VOLUME;
+	volume->comp.pipeline_id = 1;
+	volume->channels = 2;
+	volume->config.hdr.size = sizeof(volume->config);
+	volume->config.periods_sink = 2;
+	volume->config.periods_source = 2;
+	msg.header = volume->comp.hdr.cmd;
+	msg.msg_data = volume;
+	msg.msg_size = sizeof(*volume);
+	msg.reply_data = &r;
+	msg.reply_size = sizeof(r);
+
 	ipc_dump(fuzzer, &msg);
 
 	ret = fuzzer->platform->send_msg(fuzzer, &msg);
@@ -242,8 +284,10 @@ found:
 
 	fprintf(stdout, "FW boot complete\n");
 
+	//sleep(2);
+
 	/* send test message */
-	fuzzer_ipc_msg_tx(&fuzzer);
+	//fuzzer_ipc_msg_tx(&fuzzer);
 
 	/* TODO: at this point platform should be initialised and we can send IPC */
 

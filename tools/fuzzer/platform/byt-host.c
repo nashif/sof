@@ -289,6 +289,8 @@ static int byt_irq_thread(int irq, void *context)
 						   SHIM_IMRX,
 						   SHIM_IMRX_DONE,
 						   SHIM_IMRX_DONE);
+
+		printf("reply msg from DSP\n");
 		/*
 		 * handle immediate reply from DSP core. If the msg is
 		 * found, set done bit in cmd_done which is called at the
@@ -311,22 +313,24 @@ static int byt_irq_thread(int irq, void *context)
 						   SHIM_IMRX_BUSY);
 
 		/* read mailbox */
-		fuzzer_ipc_msg_rx(fuzzer);
+		if ((ipcd & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC) {
+			printf("FW crash\n");
+			fuzzer_ipc_crash(fuzzer, BYT_PANIC_OFFSET(ipcd) +
+					  MBOX_OFFSET);
+		} else {
+			fuzzer_ipc_msg_rx(fuzzer);
+		}
 
 		if (!data->boot_complete && fuzzer->boot_complete) {
 			data->boot_complete = 1;
+			byt_cmd_done(fuzzer, SOF_IPC_HOST_REPLY);
 			pthread_cond_signal(&cond);
 			pthread_mutex_unlock(&data->mutex);
 			return IRQ_HANDLED;
 		}
 
-#if 0
 		/* Handle messages from DSP Core */
-		if ((ipcd & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC) {
-			fuzzer_ipc_crash(fuzzer, BYT_PANIC_OFFSET(ipcd) +
-					  MBOX_OFFSET);
-		}
-#endif
+
 	}
 
 	return IRQ_HANDLED;
@@ -503,6 +507,12 @@ static void byt_fw_ready(struct fuzz *fuzzer)
 	data->host_box.size = fw_ready.hostbox_size;
 	data->dsp_box.offset = fw_ready.dspbox_offset;
 	data->dsp_box.size = fw_ready.hostbox_size;
+
+	/* TODO: check why these are 0 */
+	printf("host box 0x%x size 0x%x\n", data->host_box.offset,
+	       data->host_box.size);
+	printf("dsp box 0x%x size 0x%x\n", data->dsp_box.offset,
+	       data->dsp_box.size);
 
 	version = fw_ready.version;
 	printf("FW version major: %d minor: %d tag: %s\n",
