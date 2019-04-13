@@ -104,6 +104,7 @@ static void irq_handler(void *arg)
 		shim_write(SHIM_IMRD, shim_read(SHIM_IMRD) | SHIM_IMRD_DONE);
 		interrupt_clear(PLATFORM_IPC_INTERRUPT);
 		do_notify();
+		return;
 	}
 
 	/* new message from host */
