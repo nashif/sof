@@ -344,7 +344,7 @@ static int byt_send_msg(struct fuzz *fuzzer, struct ipc_msg *msg)
 
 	/* send the message */
 	mailbox_write(fuzzer, data->host_box.offset, msg->msg_data,
-			  msg->msg_size);
+		      msg->msg_size);
 	dsp_write64(fuzzer, BYT_DSP_BAR, SHIM_IPCX,
 			    cmd | SHIM_BYT_IPCX_BUSY);
 
@@ -503,10 +503,10 @@ static void byt_fw_ready(struct fuzz *fuzzer)
 	mailbox_read(fuzzer, 0, &fw_ready, sizeof(fw_ready));
 
 	/* init host_box and dsp_box */
-	data->host_box.offset = fw_ready.hostbox_offset;
-	data->host_box.size = fw_ready.hostbox_size;
-	data->dsp_box.offset = fw_ready.dspbox_offset;
-	data->dsp_box.size = fw_ready.hostbox_size;
+	data->host_box.offset = 0x400;
+	data->host_box.size = 0x400;
+	data->dsp_box.offset = 0;
+	data->dsp_box.size = 0x400;
 
 	/* TODO: check why these are 0 */
 	printf("host box 0x%x size 0x%x\n", data->host_box.offset,

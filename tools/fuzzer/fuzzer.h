@@ -120,6 +120,10 @@ struct fuzz_platform {
 struct fuzz {
 	struct fuzz_platform *platform;
 	int boot_complete;
+
+	/* ipc */
+	struct ipc_msg msg;
+
 	void *platform_data; /* core does not touch this */
 };
 

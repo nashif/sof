@@ -83,8 +83,7 @@ void *fuzzer_create_io_region(struct fuzz *fuzzer, int id, int idx)
 
 	sprintf(shm_name, "%s-io", space->name);
 
-	err = qemu_io_register_shm(shm_name, id,
-			space->desc.size, &ptr);
+	err = qemu_io_register_shm(shm_name, id, space->desc.size, &ptr);
 	if (err < 0)
 		fprintf(stderr, "error: can't allocate IO %s:%d SHM %d\n", shm_name,
 				id, err);
@@ -104,8 +103,7 @@ void *fuzzer_create_memory_region(struct fuzz *fuzzer, int id, int idx)
 
 	/* shared via SHM (not shared on real HW) */
 	sprintf(shm_name, "%s-mem", desc->name);
-	err = qemu_io_register_shm(shm_name, id,
-		desc->size, &ptr);
+	err = qemu_io_register_shm(shm_name, id, desc->size, &ptr);
 	if (err < 0)
 		fprintf(stderr, "error: can't allocate %s:%d SHM %d\n", shm_name,
 				id, err);
@@ -169,12 +167,8 @@ void fuzzer_ipc_msg_rx(struct fuzz *fuzzer)
 /* called by platform when it receives IPC message reply */
 void fuzzer_ipc_msg_reply(struct fuzz *fuzzer)
 {
-	struct ipc_msg msg;
-
-	/* TODO: we have received a cmd reply from DSP FW */
-	fuzzer->platform->get_reply(fuzzer, &msg);
-
-	ipc_dump(fuzzer, &msg);
+	fuzzer->platform->get_reply(fuzzer, &fuzzer->msg);
+	ipc_dump(fuzzer, &fuzzer->msg);
 }
 
 /* called by platform when FW crashses */
@@ -188,7 +182,6 @@ int fuzzer_ipc_msg_tx(struct fuzz *fuzzer)
 {
 	struct sof_ipc_comp_volume *volume;
 	struct sof_ipc_comp_reply r;
-	struct ipc_msg msg;
 	int ret;
 
 	struct sof_ipc_dma_trace_params params;
@@ -213,15 +206,15 @@ int fuzzer_ipc_msg_tx(struct fuzz *fuzzer)
 	volume->config.hdr.size = sizeof(volume->config);
 	volume->config.periods_sink = 2;
 	volume->config.periods_source = 2;
-	msg.header = volume->comp.hdr.cmd;
-	msg.msg_data = volume;
-	msg.msg_size = sizeof(*volume);
-	msg.reply_data = &r;
-	msg.reply_size = sizeof(r);
+	fuzzer->msg.header = volume->comp.hdr.cmd;
+	fuzzer->msg.msg_data = volume;
+	fuzzer->msg.msg_size = sizeof(*volume);
+	fuzzer->msg.reply_data = &r;
+	fuzzer->msg.reply_size = sizeof(r);
 
-	ipc_dump(fuzzer, &msg);
+	ipc_dump(fuzzer, &fuzzer->msg);
 
-	ret = fuzzer->platform->send_msg(fuzzer, &msg);
+	ret = fuzzer->platform->send_msg(fuzzer, &fuzzer->msg);
 	if (ret < 0) {
 		fprintf(stderr, "error: message tx failed\n");
 	}
@@ -284,10 +277,11 @@ found:
 
 	fprintf(stdout, "FW boot complete\n");
 
-	//sleep(2);
-
 	/* send test message */
-	//fuzzer_ipc_msg_tx(&fuzzer);
+	fuzzer_ipc_msg_tx(&fuzzer);
+
+	while (1)
+		;
 
 	/* TODO: at this point platform should be initialised and we can send IPC */
 
