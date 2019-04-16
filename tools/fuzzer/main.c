@@ -75,6 +75,13 @@ static void ipc_dump(struct fuzz *fuzzer, struct ipc_msg *msg)
 			msg->header, msg->msg_size, msg->reply_size);
 }
 
+static void ipc_dump_err(struct fuzz *fuzzer, struct ipc_msg *msg)
+{
+	/* TODO: dump data here too */
+	fprintf(stderr, "ipc: header 0x%x size %d reply %d\n",
+		msg->header, msg->msg_size, msg->reply_size);
+}
+
 void *fuzzer_create_io_region(struct fuzz *fuzzer, int id, int idx)
 {
 	struct fuzz_platform *plat = fuzzer->platform;
@@ -175,7 +182,6 @@ void fuzzer_ipc_msg_reply(struct fuzz *fuzzer)
 	ipc_dump(fuzzer, &fuzzer->msg);
 
 	pthread_cond_signal(&ipc_cond);
-	pthread_mutex_unlock(&ipc_mutex);
 }
 
 /* called by platform when FW crashses */
@@ -205,20 +211,27 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 	timeout.tv_nsec = tp.tv_usec * 1000;
 	timeout.tv_nsec += 500000000; /* 500ms timeout */
 
+	/* initialize condition */
+	pthread_cond_init(&ipc_cond, NULL);
+
 	/* first lock the boot wait mutex */
 	pthread_mutex_lock(&ipc_mutex);
 
 	/* now wait for mutex to be unlocked by boot ready message */
 	ret = pthread_cond_timedwait(&ipc_cond, &ipc_mutex, &timeout);
 	if (ret == ETIMEDOUT) {
-		fprintf(stderr, "error: DSP boot timeout\n");
-		pthread_mutex_unlock(&ipc_mutex);
-		return -EINVAL;
+		ret = -EINVAL;
+		fprintf(stderr, "error: IPC timeout\n");
+		ipc_dump_err(fuzzer, &fuzzer->msg);
 	}
 
 	pthread_mutex_unlock(&ipc_mutex);
 
-	return 0;
+	/* destroy and re-init condition */
+	pthread_cond_destroy(&ipc_cond);
+	pthread_cond_init(&ipc_cond, NULL);
+
+	return ret;
 }
 
 int main(int argc, char *argv[])

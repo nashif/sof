@@ -842,8 +842,9 @@ int parse_tplg(struct fuzz *fuzzer, char *tplg_filename)
 					 realloc(temp_comp_list, size);
 
 			for (i = (num_comps - hdr->count); i < num_comps; i++)
-				load_widget(fuzzer, temp_comp_list,
-					    next_comp_id++, i, hdr->index);
+				ret = load_widget(fuzzer, temp_comp_list,
+						  next_comp_id++, i,
+						  hdr->index);
 				if (ret < 0) {
 					printf("error: loading widget\n");
 					return -EINVAL;

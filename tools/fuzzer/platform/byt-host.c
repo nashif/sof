@@ -326,7 +326,6 @@ static int byt_irq_thread(int irq, void *context)
 			data->boot_complete = 1;
 			byt_cmd_done(fuzzer, SOF_IPC_HOST_REPLY);
 			pthread_cond_signal(&cond);
-			pthread_mutex_unlock(&data->mutex);
 			return IRQ_HANDLED;
 		}
 
@@ -478,9 +477,9 @@ static int byt_platform_init(struct fuzz *fuzzer,
 		ret = pthread_cond_timedwait(&cond, &data->mutex, &timeout);
 		if (ret == ETIMEDOUT) {
 			fprintf(stderr, "error: DSP boot timeout\n");
-			pthread_mutex_unlock(&data->mutex);
 		}
 	}
+	pthread_mutex_unlock(&data->mutex);
 
 	return ret;
 }
