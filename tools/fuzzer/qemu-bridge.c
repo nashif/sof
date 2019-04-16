@@ -373,8 +373,12 @@ void qemu_io_free(void)
             close(_iob.shm[i].fd);
         }
     }
+
     mq_unlink(_iob.parent.mq_name);
     mq_unlink(_iob.child.mq_name);
+
+ mq_close(_iob.parent.mqdes);
+    mq_close(_iob.child.mqdes);
 }
 
 void qemu_io_free_shm(int region)

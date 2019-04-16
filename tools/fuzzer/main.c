@@ -181,7 +181,9 @@ void fuzzer_ipc_msg_reply(struct fuzz *fuzzer)
 	fuzzer->platform->get_reply(fuzzer, &fuzzer->msg);
 	ipc_dump(fuzzer, &fuzzer->msg);
 
+	pthread_mutex_lock(&ipc_mutex);
 	pthread_cond_signal(&ipc_cond);
+	pthread_mutex_unlock(&ipc_mutex);
 }
 
 /* called by platform when FW crashses */
@@ -209,10 +211,7 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 	gettimeofday(&tp, NULL);
 	timeout.tv_sec  = tp.tv_sec;
 	timeout.tv_nsec = tp.tv_usec * 1000;
-	timeout.tv_nsec += 500000000; /* 500ms timeout */
-
-	/* initialize condition */
-	pthread_cond_init(&ipc_cond, NULL);
+	timeout.tv_nsec += 300000000; /* 300ms timeout */
 
 	/* first lock the boot wait mutex */
 	pthread_mutex_lock(&ipc_mutex);
@@ -223,13 +222,19 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 		ret = -EINVAL;
 		fprintf(stderr, "error: IPC timeout\n");
 		ipc_dump_err(fuzzer, &fuzzer->msg);
+		pthread_mutex_unlock(&ipc_mutex);
+		exit(0);
 	}
 
 	pthread_mutex_unlock(&ipc_mutex);
 
-	/* destroy and re-init condition */
-	pthread_cond_destroy(&ipc_cond);
-	pthread_cond_init(&ipc_cond, NULL);
+	/*
+	 * sleep for 5 ms before continuing sending the next message.
+	 * This helps with the condition signaling working better.
+	 * Otherwise the condition seems to always satisfy and
+	 * the fuzzer never waits for a response from the DSP.
+	 */
+	usleep(50000);
 
 	return ret;
 }
@@ -291,12 +296,16 @@ found:
 
 	fprintf(stdout, "FW boot complete\n");
 
+	/* initialize condition */
+	pthread_cond_init(&ipc_cond, NULL);
+
 	/* load topology */
 	ret = parse_tplg(&fuzzer, "../topology/sof-byt-rt5651.tplg");
 	if (ret < 0)
 		exit(EXIT_FAILURE);
 
 	pthread_mutex_destroy(&ipc_mutex);
+	pthread_cond_destroy(&ipc_cond);
 
 	/* TODO: at this point platform should be initialised and we can send IPC */
 
