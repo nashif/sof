@@ -298,8 +298,8 @@ static int byt_irq_thread(int irq, void *context)
 		 * because the done bit can't be set in cmd_done function
 		 * which is triggered by msg
 		 */
-		fuzzer_ipc_msg_reply(fuzzer);
 		byt_cmd_done(fuzzer, SOF_IPC_DSP_REPLY);
+		fuzzer_ipc_msg_reply(fuzzer);
 	}
 
 	/* new message from DSP */

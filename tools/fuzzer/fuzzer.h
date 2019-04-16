@@ -124,6 +124,9 @@ struct fuzz {
 	/* ipc */
 	struct ipc_msg msg;
 
+	/* ipc mutex */
+	pthread_mutex_t ipc_mutex;
+
 	void *platform_data; /* core does not touch this */
 };
 
@@ -140,6 +143,12 @@ void fuzzer_ipc_crash(struct fuzz *fuzzer, unsigned offset);
 void *fuzzer_create_memory_region(struct fuzz *fuzzer, int id, int idx);
 void *fuzzer_create_io_region(struct fuzz *fuzzer, int id, int idx);
 void fuzzer_free_regions(struct fuzz *fuzzer);
+
+/* ipc */
+int fuzzer_send_msg(struct fuzz *fuzzer);
+
+/* topology */
+int parse_tplg(struct fuzz *fuzzer, char *tplg_filename);
 
 extern struct fuzz_platform byt_platform;
 extern struct fuzz_platform cht_platform;

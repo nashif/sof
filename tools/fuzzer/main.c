@@ -33,12 +33,15 @@
 #include <stdint.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/time.h>
+#include <pthread.h>
 #include <string.h>
 #include "fuzzer.h"
 #include <uapi/ipc/topology.h>
 #include "qemu-bridge.h"
-
 #include <uapi/ipc/trace.h>
+
+pthread_cond_t ipc_cond = PTHREAD_COND_INITIALIZER;
 
 /* list of supported target platforms */
 static struct fuzz_platform *platform[] =
@@ -169,6 +172,9 @@ void fuzzer_ipc_msg_reply(struct fuzz *fuzzer)
 {
 	fuzzer->platform->get_reply(fuzzer, &fuzzer->msg);
 	ipc_dump(fuzzer, &fuzzer->msg);
+
+	pthread_cond_signal(&ipc_cond);
+	pthread_mutex_unlock(&fuzzer->ipc_mutex);
 }
 
 /* called by platform when FW crashses */
@@ -178,46 +184,38 @@ void fuzzer_ipc_crash(struct fuzz *fuzzer, unsigned offset)
 }
 
 /* TODO: this is hardcoded atm, needs to be able to send any message */
-int fuzzer_ipc_msg_tx(struct fuzz *fuzzer)
+int fuzzer_send_msg(struct fuzz *fuzzer)
 {
-	struct sof_ipc_comp_volume *volume;
-	struct sof_ipc_comp_reply r;
+	struct timespec timeout;
+	struct timeval tp;
 	int ret;
-
-	struct sof_ipc_dma_trace_params params;
-#if 0
-	/* TODO: hard coded test message to enable trace */
-	msg.header = SOF_IPC_TRACE_DMA_PARAMS;
-	params.hdr.cmd = SOF_IPC_GLB_TRACE_MSG | SOF_IPC_TRACE_DMA_PARAMS;
-	params.hdr.size = sizeof(params);
-	params.stream_tag = 0;
-#endif
-	volume = (struct sof_ipc_comp_volume *)malloc(sizeof(*volume));
-	if (!volume)
-		return -ENOMEM;
-
-	/* configure volume IPC message */
-	volume->comp.hdr.size = sizeof(*volume);
-	volume->comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
-	volume->comp.id = 2;
-	volume->comp.type = SOF_COMP_VOLUME;
-	volume->comp.pipeline_id = 1;
-	volume->channels = 2;
-	volume->config.hdr.size = sizeof(volume->config);
-	volume->config.periods_sink = 2;
-	volume->config.periods_source = 2;
-	fuzzer->msg.header = volume->comp.hdr.cmd;
-	fuzzer->msg.msg_data = volume;
-	fuzzer->msg.msg_size = sizeof(*volume);
-	fuzzer->msg.reply_data = &r;
-	fuzzer->msg.reply_size = sizeof(r);
 
 	ipc_dump(fuzzer, &fuzzer->msg);
 
+	/* send msg */
 	ret = fuzzer->platform->send_msg(fuzzer, &fuzzer->msg);
 	if (ret < 0) {
 		fprintf(stderr, "error: message tx failed\n");
 	}
+
+	/* wait for ipc reply */
+	gettimeofday(&tp, NULL);
+	timeout.tv_sec  = tp.tv_sec;
+	timeout.tv_nsec = tp.tv_usec * 1000;
+	timeout.tv_nsec += 300000000; /* 300ms timeout */
+
+	/* first lock the boot wait mutex */
+	pthread_mutex_lock(&fuzzer->ipc_mutex);
+
+	/* now wait for mutex to be unlocked by boot ready message */
+	ret = pthread_cond_timedwait(&ipc_cond, &fuzzer->ipc_mutex, &timeout);
+	if (ret == ETIMEDOUT) {
+		fprintf(stderr, "error: DSP boot timeout\n");
+		pthread_mutex_unlock(&fuzzer->ipc_mutex);
+		return -EINVAL;
+	}
+
+	return 0;
 }
 
 int main(int argc, char *argv[])
@@ -277,11 +275,10 @@ found:
 
 	fprintf(stdout, "FW boot complete\n");
 
-	/* send test message */
-	fuzzer_ipc_msg_tx(&fuzzer);
-
-	while (1)
-		;
+	/* load topology */
+	ret = parse_tplg(&fuzzer, "../topology/sof-byt-rt5651.tplg");
+	if (ret < 0)
+		exit(EXIT_FAILURE);
 
 	/* TODO: at this point platform should be initialised and we can send IPC */
 
