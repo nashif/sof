@@ -42,6 +42,7 @@
 #include <uapi/ipc/trace.h>
 
 pthread_cond_t ipc_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t ipc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* list of supported target platforms */
 static struct fuzz_platform *platform[] =
@@ -174,7 +175,7 @@ void fuzzer_ipc_msg_reply(struct fuzz *fuzzer)
 	ipc_dump(fuzzer, &fuzzer->msg);
 
 	pthread_cond_signal(&ipc_cond);
-	pthread_mutex_unlock(&fuzzer->ipc_mutex);
+	pthread_mutex_unlock(&ipc_mutex);
 }
 
 /* called by platform when FW crashses */
@@ -202,18 +203,20 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 	gettimeofday(&tp, NULL);
 	timeout.tv_sec  = tp.tv_sec;
 	timeout.tv_nsec = tp.tv_usec * 1000;
-	timeout.tv_nsec += 500000000; /* 300ms timeout */
+	timeout.tv_nsec += 500000000; /* 500ms timeout */
 
 	/* first lock the boot wait mutex */
-	pthread_mutex_lock(&fuzzer->ipc_mutex);
+	pthread_mutex_lock(&ipc_mutex);
 
 	/* now wait for mutex to be unlocked by boot ready message */
-	ret = pthread_cond_timedwait(&ipc_cond, &fuzzer->ipc_mutex, &timeout);
+	ret = pthread_cond_timedwait(&ipc_cond, &ipc_mutex, &timeout);
 	if (ret == ETIMEDOUT) {
 		fprintf(stderr, "error: DSP boot timeout\n");
-		pthread_mutex_unlock(&fuzzer->ipc_mutex);
+		pthread_mutex_unlock(&ipc_mutex);
 		return -EINVAL;
 	}
+
+	pthread_mutex_unlock(&ipc_mutex);
 
 	return 0;
 }
@@ -279,6 +282,8 @@ found:
 	ret = parse_tplg(&fuzzer, "../topology/sof-byt-rt5651.tplg");
 	if (ret < 0)
 		exit(EXIT_FAILURE);
+
+	pthread_mutex_destroy(&ipc_mutex);
 
 	/* TODO: at this point platform should be initialised and we can send IPC */
 
