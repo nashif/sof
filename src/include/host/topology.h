@@ -32,7 +32,6 @@
 #define _COMMON_TPLG_H
 
 #include <sound/asoc.h>
-#include "common_test.h"
 
 /*
  * TODO: include these token from kernel uapi header
