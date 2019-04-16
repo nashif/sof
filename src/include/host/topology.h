@@ -58,6 +58,9 @@
 #define SOF_TKN_SRC_RATE_IN                     300
 #define SOF_TKN_SRC_RATE_OUT                    301
 
+/* PCM */
+#define SOF_TKN_PCM_DMAC_CONFIG                 353
+
 /* Generic components */
 #define SOF_TKN_COMP_PERIOD_SINK_COUNT          400
 #define SOF_TKN_COMP_PERIOD_SOURCE_COUNT        401
@@ -173,6 +176,12 @@ static const struct sof_topology_token comp_tokens[] = {
 	{SOF_TKN_COMP_FORMAT,
 		SND_SOC_TPLG_TUPLE_TYPE_STRING, get_token_comp_format,
 		offsetof(struct sof_ipc_comp_config, frame_fmt), 0},
+};
+
+/* PCM */
+static const struct sof_topology_token pcm_tokens[] = {
+	{SOF_TKN_PCM_DMAC_CONFIG, SND_SOC_TPLG_TUPLE_TYPE_WORD, get_token_uint32_t,
+		offsetof(struct sof_ipc_comp_host, dmac_config), 0},
 };
 
 int sof_parse_tokens(void *object,
