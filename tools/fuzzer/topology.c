@@ -48,55 +48,6 @@
 
 FILE * file;
 
-#if 0
-/*
- * Register component driver
- * Only needed once per component type
- */
-static void register_comp(int comp_type)
-{
-	int index;
-	char message[DEBUG_MSG_LEN + MAX_LIB_NAME_LEN];
-
-	/* register file comp driver (no shared library needed) */
-	if (comp_type == SND_SOC_TPLG_DAPM_DAI_IN ||
-	    comp_type == SND_SOC_TPLG_DAPM_AIF_IN) {
-		if (!lib_table[0].register_drv) {
-			sys_comp_file_init();
-			lib_table[0].register_drv = 1;
-			debug_print("registered file comp driver\n");
-		}
-		return;
-	}
-
-	/* get index of comp in shared library table */
-	index = get_index_by_type(comp_type, lib_table);
-	if (index < 0)
-		return;
-
-	/* register comp driver if not already registered */
-	if (!lib_table[index].register_drv) {
-		sprintf(message, "registered comp driver for %s\n",
-			lib_table[index].comp_name);
-		debug_print(message);
-
-		/* open shared library object */
-		sprintf(message, "opening shared lib %s\n",
-			lib_table[index].library_name);
-		debug_print(message);
-
-		lib_table[index].handle = dlopen(lib_table[index].library_name,
-						 RTLD_LAZY);
-		if (!lib_table[index].handle) {
-			fprintf(stderr, "error: %s\n", dlerror());
-			exit(EXIT_FAILURE);
-		}
-
-		/* comp init is executed on lib load */
-		lib_table[index].register_drv = 1;
-	}
-}
-#endif
 /* read vendor tuples array from topology */
 static int read_array(struct snd_soc_tplg_vendor_array *array)
 {
@@ -149,15 +100,20 @@ static int read_array(struct snd_soc_tplg_vendor_array *array)
 	return 0;
 }
 
-#if 0
 /* load pipeline graph DAPM widget*/
-static int load_graph(struct sof *sof, struct comp_info *temp_comp_list,
+static int load_graph(struct fuzz *fuzzer, struct comp_info *temp_comp_list,
 		      int count, int num_comps, int pipeline_id)
 {
 	struct sof_ipc_pipe_comp_connect connection;
 	struct snd_soc_tplg_dapm_graph_elem *graph_elem;
+	struct sof_ipc_pipe_comp_connect connect;
+	struct sof_ipc_reply r;
 	size_t size;
 	int i, j, ret = 0;
+
+	/* configure route */
+	connection.hdr.size = sizeof(connection);
+	connection.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_CONNECT;
 
 	/* allocate memory for graph elem */
 	size = sizeof(struct snd_soc_tplg_dapm_graph_elem);
@@ -187,31 +143,34 @@ static int load_graph(struct sof *sof, struct comp_info *temp_comp_list,
 				connection.sink_id = temp_comp_list[j].id;
 		}
 
-		strcat(pipeline_string, graph_elem->source);
-		strcat(pipeline_string, "->");
-
-		if (i == (count - 1))
-			strcat(pipeline_string, graph_elem->sink);
-
 		/* connect source and sink */
-		if (connection.source_id != -1 && connection.sink_id != -1)
-			if (ipc_comp_connect(sof->ipc, &connection) < 0) {
-				fprintf(stderr, "error: comp connect\n");
-				return -EINVAL;
-			}
-	}
+		if (connection.source_id == -1 || connection.sink_id == -1)
+			return -EINVAL;
 
+		/* configure fuzzer msg */
+		fuzzer->msg.header = connection.hdr.cmd;
+		fuzzer->msg.msg_data = &connection;
+		fuzzer->msg.msg_size = sizeof(connection);
+		fuzzer->msg.reply_data = &r;
+		fuzzer->msg.reply_size = sizeof(r);
+
+		/* load volume component */
+		ret = fuzzer_send_msg(fuzzer);
+		if (ret < 0)
+			fprintf(stderr, "error: message tx failed\n");
+	}
+#if 0
 	/* pipeline complete after pipeline connections are established */
 	for (i = 0; i < num_comps; i++) {
 		if (temp_comp_list[i].pipeline_id == pipeline_id &&
 		    temp_comp_list[i].type == SND_SOC_TPLG_DAPM_SCHEDULER)
 			ipc_pipeline_complete(sof->ipc, temp_comp_list[i].id);
 	}
-
+#endif
 	free(graph_elem);
 	return 0;
 }
-#endif
+
 /* load buffer DAPM widget */
 static int load_buffer(struct fuzz *fuzzer, int comp_id,
 		       int pipeline_id, int size)
@@ -241,7 +200,6 @@ static int load_buffer(struct fuzz *fuzzer, int comp_id,
 			       size);
 
 	/* configure fuzzer msg */
-
 	fuzzer->msg.header = buffer.comp.hdr.cmd;
 	fuzzer->msg.msg_data = &buffer;
 	fuzzer->msg.msg_size = sizeof(buffer);
@@ -256,18 +214,25 @@ static int load_buffer(struct fuzz *fuzzer, int comp_id,
 	free(array);
 	return 0;
 }
-#if 0
+
 /* load fileread component */
-static int load_fileread(struct sof *sof, int comp_id, int pipeline_id,
-			 int size, int *fr_id, int *sched_id,
-			 struct testbench_prm *tp)
+static int load_pcm(struct fuzz *fuzzer, int comp_id, int pipeline_id,
+		    int size, int dir)
 {
-	struct sof_ipc_comp_file fileread;
 	struct snd_soc_tplg_vendor_array *array = NULL;
+	struct sof_ipc_comp_host host;
+	struct sof_ipc_comp_reply r;
 	size_t total_array_size = 0, read_size;
 	int ret = 0;
 
-	fileread.config.frame_fmt = find_format(tp->bits_in);
+	/* configure host comp IPC message */
+	host.comp.hdr.size = sizeof(host);
+	host.comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
+	host.comp.id = comp_id;
+	host.comp.type = SOF_COMP_HOST;
+	host.comp.pipeline_id = pipeline_id;
+	host.direction = dir;
+	host.config.hdr.size = sizeof(host.config);
 
 	/* allocate memory for vendor tuple array */
 	array = (struct snd_soc_tplg_vendor_array *)malloc(size);
@@ -285,48 +250,61 @@ static int load_fileread(struct sof *sof, int comp_id, int pipeline_id,
 		read_array(array);
 
 		/* parse comp tokens */
-		ret = sof_parse_tokens(&fileread.config, comp_tokens,
+		ret = sof_parse_tokens(&host.config, comp_tokens,
 				       ARRAY_SIZE(comp_tokens), array,
 				       array->size);
 		if (ret != 0) {
-			fprintf(stderr, "error: parse fileread tokens %d\n",
+			fprintf(stderr, "error: parse comp tokens %d\n",
 				size);
 			return -EINVAL;
 		}
+
+		/* parse pcm tokens */
+		ret = sof_parse_tokens(&host, pcm_tokens,
+				       ARRAY_SIZE(comp_tokens), array,
+				       array->size);
+		if (ret != 0) {
+			fprintf(stderr, "error: parse pcm tokens %d\n",
+				size);
+			return -EINVAL;
+		}
+
 		total_array_size += array->size;
 	}
 
-	/* configure fileread */
-	fileread.fn = strdup(tp->input_file);
-	fileread.mode = FILE_READ;
-	fileread.comp.id = comp_id;
+	/* configure fuzzer msg */
+	fuzzer->msg.header = host.comp.hdr.cmd;
+	fuzzer->msg.msg_data = &host;
+	fuzzer->msg.msg_size = sizeof(host);
+	fuzzer->msg.reply_data = &r;
+	fuzzer->msg.reply_size = sizeof(r);
 
-	/* use fileread comp as scheduling comp */
-	*fr_id = *sched_id = comp_id;
-	fileread.comp.hdr.size = sizeof(struct sof_ipc_comp_file);
-	fileread.comp.type = SOF_COMP_FILEREAD;
-	fileread.comp.pipeline_id = pipeline_id;
-	fileread.config.hdr.size = sizeof(struct sof_ipc_comp_config);
-
-	/* create fileread component */
-	if (ipc_comp_new(sof->ipc, (struct sof_ipc_comp *)&fileread) < 0) {
-		fprintf(stderr, "error: comp register\n");
-		return -EINVAL;
-	}
+	/* load volume component */
+	ret = fuzzer_send_msg(fuzzer);
+	if (ret < 0)
+		fprintf(stderr, "error: message tx failed\n");
 
 	free(array);
-	free(fileread.fn);
 	return 0;
 }
 
 /* load filewrite component */
-static int load_filewrite(struct sof *sof, int comp_id, int pipeline_id,
-			  int size, int *fw_id, struct testbench_prm *tp)
+static int load_dai(struct fuzz *fuzzer, int comp_id, int pipeline_id,
+		    int size)
 {
-	struct sof_ipc_comp_file filewrite;
 	struct snd_soc_tplg_vendor_array *array = NULL;
+	struct sof_ipc_comp_dai comp_dai;
+	struct sof_ipc_comp_reply r;
 	size_t total_array_size = 0, read_size;
 	int ret = 0;
+
+	/* configure comp_dai */
+	comp_dai.comp.hdr.size = sizeof(comp_dai);
+	comp_dai.comp.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_COMP_NEW;
+	comp_dai.comp.id = comp_id;
+	comp_dai.comp.type = SOF_COMP_DAI;
+	comp_dai.comp.pipeline_id = pipeline_id;
+	comp_dai.config.hdr.size = sizeof(comp_dai.config);
 
 	/* allocate memory for vendor tuple array */
 	array = (struct snd_soc_tplg_vendor_array *)malloc(size);
@@ -345,7 +323,7 @@ static int load_filewrite(struct sof *sof, int comp_id, int pipeline_id,
 		read_array(array);
 
 		/* parse comp tokens */
-		ret = sof_parse_tokens(&filewrite.config, comp_tokens,
+		ret = sof_parse_tokens(&comp_dai.config, comp_tokens,
 				       ARRAY_SIZE(comp_tokens), array,
 				       array->size);
 		if (ret != 0) {
@@ -356,27 +334,22 @@ static int load_filewrite(struct sof *sof, int comp_id, int pipeline_id,
 		total_array_size += array->size;
 	}
 
-	/* configure filewrite */
-	filewrite.fn = strdup(tp->output_file);
-	filewrite.comp.id = comp_id;
-	filewrite.mode = FILE_WRITE;
-	*fw_id = comp_id;
-	filewrite.comp.hdr.size = sizeof(struct sof_ipc_comp_file);
-	filewrite.comp.type = SOF_COMP_FILEREAD;
-	filewrite.comp.pipeline_id = pipeline_id;
-	filewrite.config.hdr.size = sizeof(struct sof_ipc_comp_config);
+	/* configure fuzzer msg */
+	fuzzer->msg.header = comp_dai.comp.hdr.cmd;
+	fuzzer->msg.msg_data = &comp_dai;
+	fuzzer->msg.msg_size = sizeof(comp_dai);
+	fuzzer->msg.reply_data = &r;
+	fuzzer->msg.reply_size = sizeof(r);
 
-	/* create filewrite component */
-	if (ipc_comp_new(sof->ipc, (struct sof_ipc_comp *)&filewrite) < 0) {
-		fprintf(stderr, "error: comp register\n");
-		return -EINVAL;
-	}
+	/* load volume component */
+	ret = fuzzer_send_msg(fuzzer);
+	if (ret < 0)
+		fprintf(stderr, "error: message tx failed\n");
 
 	free(array);
-	free(filewrite.fn);
 	return 0;
 }
-#endif
+
 /* load pda dapm widget */
 static int load_pga(struct fuzz *fuzzer, int comp_id, int pipeline_id,
 		    int size)
@@ -437,19 +410,21 @@ static int load_pga(struct fuzz *fuzzer, int comp_id, int pipeline_id,
 	return 0;
 }
 
-#if 0
 /* load scheduler dapm widget */
-static int load_pipeline(struct sof *sof, struct sof_ipc_pipe_new *pipeline,
-			 int comp_id, int pipeline_id, int size, int *sched_id)
+static int load_pipeline(struct fuzz *fuzzer, int comp_id, int pipeline_id,
+			 int size, int sched_id)
 {
 	struct snd_soc_tplg_vendor_array *array = NULL;
+	struct sof_ipc_pipe_new pipeline;
+	struct sof_ipc_comp_reply r;
 	size_t total_array_size = 0, read_size;
 	int ret = 0;
 
 	/* configure pipeline */
-	pipeline->sched_id = *sched_id;
-	pipeline->comp_id = comp_id;
-	pipeline->pipeline_id = pipeline_id;
+	pipeline.hdr.cmd = SOF_IPC_GLB_TPLG_MSG | SOF_IPC_TPLG_PIPE_NEW;
+	pipeline.sched_id = sched_id;
+	pipeline.comp_id = comp_id;
+	pipeline.pipeline_id = pipeline_id;
 
 	/* allocate memory for vendor tuple array */
 	array = (struct snd_soc_tplg_vendor_array *)malloc(size);
@@ -470,7 +445,7 @@ static int load_pipeline(struct sof *sof, struct sof_ipc_pipe_new *pipeline,
 			return -EINVAL;
 
 		/* parse scheduler tokens */
-		ret = sof_parse_tokens(pipeline, sched_tokens,
+		ret = sof_parse_tokens(&pipeline, sched_tokens,
 				       ARRAY_SIZE(sched_tokens), array,
 				       array->size);
 		if (ret != 0) {
@@ -481,16 +456,22 @@ static int load_pipeline(struct sof *sof, struct sof_ipc_pipe_new *pipeline,
 		total_array_size += array->size;
 	}
 
-	/* Create pipeline */
-	if (ipc_pipeline_new(sof->ipc, pipeline) < 0) {
-		fprintf(stderr, "error: pipeline new\n");
-		return -EINVAL;
-	}
+	/* configure fuzzer msg */
+	fuzzer->msg.header = pipeline.hdr.cmd;
+	fuzzer->msg.msg_data = &pipeline;
+	fuzzer->msg.msg_size = sizeof(pipeline);
+	fuzzer->msg.reply_data = &r;
+	fuzzer->msg.reply_size = sizeof(r);
+
+	/* load volume component */
+	ret = fuzzer_send_msg(fuzzer);
+	if (ret < 0)
+		fprintf(stderr, "error: message tx failed\n");
 
 	free(array);
 	return 0;
 }
-#endif
+
 /* load dapm widget kcontrols
  * we don't use controls in the testbench atm.
  * so just skip to the next dapm widget
@@ -728,27 +709,34 @@ static int load_widget(struct fuzz *fuzzer, struct comp_info *temp_comp_list,
 			return -EINVAL;
 		}
 		break;
-#if 0
-	/* replace pcm playback component with fileread in testbench */
+
 	case(SND_SOC_TPLG_DAPM_AIF_IN):
-		if (load_fileread(sof, temp_comp_list[comp_index].id,
-				  pipeline_id, widget->priv.size,
-				  fr_id, sched_id, tp) < 0) {
-			fprintf(stderr, "error: load fileread\n");
+		if (load_pcm(fuzzer, temp_comp_list[comp_index].id,
+			     pipeline_id, widget->priv.size,
+			     SOF_IPC_STREAM_PLAYBACK) < 0) {
+			fprintf(stderr, "error: load playback pcm\n");
 			return -EINVAL;
 		}
 		break;
 
-	/* replace dai in component with filewrite in testbench */
+	case(SND_SOC_TPLG_DAPM_AIF_OUT):
+		if (load_pcm(fuzzer, temp_comp_list[comp_index].id,
+			     pipeline_id, widget->priv.size,
+			     SOF_IPC_STREAM_CAPTURE) < 0) {
+			fprintf(stderr, "error: load capture pcm\n");
+			return -EINVAL;
+		}
+		break;
+
 	case(SND_SOC_TPLG_DAPM_DAI_IN):
-		if (load_filewrite(sof, temp_comp_list[comp_index].id,
-				   pipeline_id, widget->priv.size,
-				   fw_id, tp) < 0) {
+	case(SND_SOC_TPLG_DAPM_DAI_OUT):
+		if (load_dai(fuzzer, temp_comp_list[comp_index].id,
+			     pipeline_id, widget->priv.size) < 0) {
 			fprintf(stderr, "error: load filewrite\n");
 			return -EINVAL;
 		}
 		break;
-#endif
+
 	/* load buffer */
 	case(SND_SOC_TPLG_DAPM_BUFFER):
 		if (load_buffer(fuzzer, temp_comp_list[comp_index].id,
@@ -757,19 +745,18 @@ static int load_widget(struct fuzz *fuzzer, struct comp_info *temp_comp_list,
 			return -EINVAL;
 		}
 		break;
-#if 0
+
 	/* load pipeline */
 	case(SND_SOC_TPLG_DAPM_SCHEDULER):
-		if (load_pipeline(fuzzer, pipeline,
-				  temp_comp_list[comp_index].id,
+		/* FIXME: sched id shouldn't always be 0 */
+		if (load_pipeline(fuzzer, temp_comp_list[comp_index].id,
 				  pipeline_id,
-				  widget->priv.size,
-				  sched_id) < 0) {
-			fprintf(stderr, "error: load buffer\n");
+				  widget->priv.size, 0) < 0) {
+			fprintf(stderr, "error: load pipeline\n");
 			return -EINVAL;
 		}
 		break;
-#endif
+
 	/* load src widget */
 	case(SND_SOC_TPLG_DAPM_SRC):
 		if (load_src(fuzzer, temp_comp_list[comp_index].id,
@@ -862,10 +849,10 @@ int parse_tplg(struct fuzz *fuzzer, char *tplg_filename)
 					return -EINVAL;
 				}
 			break;
-#if 0
+
 		/* set up component connections from pipeline graph */
 		case SND_SOC_TPLG_TYPE_DAPM_GRAPH:
-			if (load_graph(sof, temp_comp_list, hdr->count,
+			if (load_graph(fuzzer, temp_comp_list, hdr->count,
 				       num_comps, hdr->index) < 0) {
 				fprintf(stderr, "error: pipeline graph\n");
 				return -EINVAL;
@@ -874,7 +861,7 @@ int parse_tplg(struct fuzz *fuzzer, char *tplg_filename)
 			if (ftell(file) == file_size)
 				goto finish;
 			break;
-#endif
+
 		default:
 			fseek(file, hdr->payload_size, SEEK_CUR);
 			if (ftell(file) == file_size)
