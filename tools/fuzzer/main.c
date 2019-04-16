@@ -202,7 +202,7 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 	gettimeofday(&tp, NULL);
 	timeout.tv_sec  = tp.tv_sec;
 	timeout.tv_nsec = tp.tv_usec * 1000;
-	timeout.tv_nsec += 300000000; /* 300ms timeout */
+	timeout.tv_nsec += 500000000; /* 300ms timeout */
 
 	/* first lock the boot wait mutex */
 	pthread_mutex_lock(&fuzzer->ipc_mutex);

@@ -46,6 +46,8 @@
 #include <uapi/ipc/stream.h>
 #include "host/topology.h"
 
+FILE * file;
+
 #if 0
 /*
  * Register component driver
@@ -93,7 +95,6 @@ static void register_comp(int comp_type)
 		/* comp init is executed on lib load */
 		lib_table[index].register_drv = 1;
 	}
-
 }
 #endif
 /* read vendor tuples array from topology */
