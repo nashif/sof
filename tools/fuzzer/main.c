@@ -68,14 +68,14 @@ static void usage(char *name)
 	exit(0);
 }
 
-static void ipc_dump(struct fuzz *fuzzer, struct ipc_msg *msg)
+static void ipc_dump(struct ipc_msg *msg)
 {
 	/* TODO: dump data here too */
 	fprintf(stdout, "ipc: header 0x%x size %d reply %d\n",
 			msg->header, msg->msg_size, msg->reply_size);
 }
 
-static void ipc_dump_err(struct fuzz *fuzzer, struct ipc_msg *msg)
+static void ipc_dump_err(struct ipc_msg *msg)
 {
 	/* TODO: dump data here too */
 	fprintf(stderr, "ipc: header 0x%x size %d reply %d\n",
@@ -137,6 +137,61 @@ void fuzzer_free_regions(struct fuzz *fuzzer)
     qemu_io_free();
 }
 
+static fuzz_ipc_size(uint32_t *size)
+{
+	*size = rand() %  SOF_IPC_MSG_MAX_SIZE + 1;
+}
+
+/* fuzz the ipc commands */
+static void fuzz_ipc_cmd(uint32_t *cmd)
+{
+	/* currently there are 10 % global IPC commands */
+	uint32_t glb_cmd = rand() % 9 + 1;
+	uint32_t sub_cmd = rand() % 33 + 1;
+
+	/* placeholder for more intelligent fuzzing based on global type */
+	switch (glb_cmd) {
+	case SOF_IPC_GLB_REPLY:
+		break;
+	case SOF_IPC_GLB_COMPOUND:
+		break;
+	case SOF_IPC_GLB_TPLG_MSG:
+		break;
+	case SOF_IPC_GLB_PM_MSG:
+		break;
+	case SOF_IPC_GLB_COMP_MSG:
+		break;
+	case SOF_IPC_GLB_STREAM_MSG:
+		break;
+	case SOF_IPC_FW_READY:
+		break;
+	case SOF_IPC_GLB_DAI_MSG:
+		break;
+	case SOF_IPC_GLB_TRACE_MSG:
+		break;
+	default:
+		break;
+	}
+
+	*cmd = SOF_GLB_TYPE(glb_cmd) | SOF_CMD_TYPE(sub_cmd);
+}
+
+static void fuzz_ipc(struct ipc_msg *msg)
+{
+	struct sof_ipc_cmd_hdr *hdr = (struct sof_ipc_cmd_hdr *)msg->msg_data;
+
+	/* fuzz cmd */
+	fuzz_ipc_cmd(&hdr->cmd);
+	msg->header = hdr->cmd;
+
+	/* fuzz the size */
+	fuzz_ipc_size(&hdr->size);
+	msg->msg_size = hdr->size;
+
+	printf("fuzzed ");
+	ipc_dump(msg);
+}
+
 /* called by platform when it receives IPC message */
 void fuzzer_ipc_msg_rx(struct fuzz *fuzzer)
 {
@@ -178,8 +233,13 @@ void fuzzer_ipc_msg_rx(struct fuzz *fuzzer)
 /* called by platform when it receives IPC message reply */
 void fuzzer_ipc_msg_reply(struct fuzz *fuzzer)
 {
-	fuzzer->platform->get_reply(fuzzer, &fuzzer->msg);
-	ipc_dump(fuzzer, &fuzzer->msg);
+	int ret;
+
+	ret = fuzzer->platform->get_reply(fuzzer, &fuzzer->msg);
+	if (ret < 0)
+		fprintf(stderr, "error: incorrect DSP reply\n");
+
+	ipc_dump(&fuzzer->msg);
 
 	pthread_mutex_lock(&ipc_mutex);
 	pthread_cond_signal(&ipc_cond);
@@ -199,14 +259,17 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 	struct timeval tp;
 	int ret;
 
-	ipc_dump(fuzzer, &fuzzer->msg);
+	ipc_dump(&fuzzer->msg);
 
+	fuzz_ipc(&fuzzer->msg);
+
+	ipc_dump(&fuzzer->msg);
+#if 0
 	/* send msg */
 	ret = fuzzer->platform->send_msg(fuzzer, &fuzzer->msg);
 	if (ret < 0) {
 		fprintf(stderr, "error: message tx failed\n");
 	}
-
 	/* wait for ipc reply */
 	gettimeofday(&tp, NULL);
 	timeout.tv_sec  = tp.tv_sec;
@@ -221,12 +284,13 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 	if (ret == ETIMEDOUT) {
 		ret = -EINVAL;
 		fprintf(stderr, "error: IPC timeout\n");
-		ipc_dump_err(fuzzer, &fuzzer->msg);
+		ipc_dump_err(&fuzzer->msg);
 		pthread_mutex_unlock(&ipc_mutex);
 		exit(0);
 	}
 
 	pthread_mutex_unlock(&ipc_mutex);
+#endif
 
 	/*
 	 * sleep for 5 ms before continuing sending the next message.
@@ -287,6 +351,7 @@ int main(int argc, char *argv[])
 	exit(EXIT_FAILURE);
 
 found:
+#if 0
 	ret = platform[i]->init(&fuzzer, platform[i]);
 	if (ret == ETIMEDOUT) {
 		fprintf(stderr, "error: platform %s failed to initialise\n",
@@ -295,9 +360,13 @@ found:
 	}
 
 	fprintf(stdout, "FW boot complete\n");
-
+#endif
 	/* initialize condition */
 	pthread_cond_init(&ipc_cond, NULL);
+
+	/*FIXME: allocate max ipc size bytes for the msg and reply for now */
+	fuzzer.msg.msg_data = malloc(SOF_IPC_MSG_MAX_SIZE);
+	fuzzer.msg.reply_data = malloc(SOF_IPC_MSG_MAX_SIZE);
 
 	/* load topology */
 	ret = parse_tplg(&fuzzer, "../topology/sof-byt-rt5651.tplg");

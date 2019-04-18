@@ -149,7 +149,7 @@ static int load_graph(struct fuzz *fuzzer, struct comp_info *temp_comp_list,
 
 		/* configure fuzzer msg */
 		fuzzer->msg.header = connection.hdr.cmd;
-		fuzzer->msg.msg_data = &connection;
+		memcpy(fuzzer->msg.msg_data, &connection, connection.hdr.size);
 		fuzzer->msg.msg_size = sizeof(connection);
 		fuzzer->msg.reply_data = &r;
 		fuzzer->msg.reply_size = sizeof(r);
@@ -201,7 +201,7 @@ static int load_buffer(struct fuzz *fuzzer, int comp_id,
 
 	/* configure fuzzer msg */
 	fuzzer->msg.header = buffer.comp.hdr.cmd;
-	fuzzer->msg.msg_data = &buffer;
+	memcpy(fuzzer->msg.msg_data, &buffer, buffer.comp.hdr.size);
 	fuzzer->msg.msg_size = sizeof(buffer);
 	fuzzer->msg.reply_data = &r;
 	fuzzer->msg.reply_size = sizeof(r);
@@ -274,7 +274,7 @@ static int load_pcm(struct fuzz *fuzzer, int comp_id, int pipeline_id,
 
 	/* configure fuzzer msg */
 	fuzzer->msg.header = host.comp.hdr.cmd;
-	fuzzer->msg.msg_data = &host;
+	memcpy(fuzzer->msg.msg_data, &host, host.comp.hdr.size);
 	fuzzer->msg.msg_size = sizeof(host);
 	fuzzer->msg.reply_data = &r;
 	fuzzer->msg.reply_size = sizeof(r);
@@ -336,7 +336,7 @@ static int load_dai(struct fuzz *fuzzer, int comp_id, int pipeline_id,
 
 	/* configure fuzzer msg */
 	fuzzer->msg.header = comp_dai.comp.hdr.cmd;
-	fuzzer->msg.msg_data = &comp_dai;
+	memcpy(fuzzer->msg.msg_data, &comp_dai, comp_dai.comp.hdr.size);
 	fuzzer->msg.msg_size = sizeof(comp_dai);
 	fuzzer->msg.reply_data = &r;
 	fuzzer->msg.reply_size = sizeof(r);
@@ -396,7 +396,7 @@ static int load_pga(struct fuzz *fuzzer, int comp_id, int pipeline_id,
 
 	/* configure fuzzer msg */
 	fuzzer->msg.header = volume.comp.hdr.cmd;
-	fuzzer->msg.msg_data = &volume;
+	memcpy(fuzzer->msg.msg_data, &volume, volume.comp.hdr.size);
 	fuzzer->msg.msg_size = sizeof(volume);
 	fuzzer->msg.reply_data = &r;
 	fuzzer->msg.reply_size = sizeof(r);
@@ -458,7 +458,7 @@ static int load_pipeline(struct fuzz *fuzzer, int comp_id, int pipeline_id,
 
 	/* configure fuzzer msg */
 	fuzzer->msg.header = pipeline.hdr.cmd;
-	fuzzer->msg.msg_data = &pipeline;
+	memcpy(fuzzer->msg.msg_data, &pipeline, pipeline.hdr.size);
 	fuzzer->msg.msg_size = sizeof(pipeline);
 	fuzzer->msg.reply_data = &r;
 	fuzzer->msg.reply_size = sizeof(r);
@@ -647,7 +647,7 @@ static int load_src(struct fuzz *fuzzer, int comp_id, int pipeline_id,
 
 	/* configure fuzzer msg */
 	fuzzer->msg.header = src.comp.hdr.cmd;
-	fuzzer->msg.msg_data = &src;
+	memcpy(fuzzer->msg.msg_data, &src, src.comp.hdr.size);
 	fuzzer->msg.msg_size = sizeof(src);
 	fuzzer->msg.reply_data = &r;
 	fuzzer->msg.reply_size = sizeof(r);

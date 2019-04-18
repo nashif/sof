@@ -262,12 +262,12 @@ static int byt_irq_handler(int irq, void *context)
 	struct fuzz *fuzzer = (struct fuzz *)context;
 	uint64_t isr;
 	int ret = IRQ_NONE;
-printf("in %s\n", __func__);
+
 	/* Interrupt arrived, check src */
 	isr = dsp_read64(fuzzer, BYT_DSP_BAR, SHIM_ISRX);
 	if (isr & (SHIM_ISRX_DONE | SHIM_ISRX_BUSY))
 		ret = IRQ_WAKE_THREAD;
-printf("%s isr 0x%lx\n", __func__, isr);
+
 	return ret;
 }
 
@@ -340,6 +340,7 @@ static int byt_send_msg(struct fuzz *fuzzer, struct ipc_msg *msg)
 {
 	struct fuzz_platform *plat = fuzzer->platform;
 	struct byt_data *data = fuzzer->platform_data;
+	struct sof_ipc_cmd_hdr *hdr = (struct sof_ipc_cmd_hdr *)msg->msg_data;
 	uint64_t cmd = msg->header;
 
 	/* send the message */
@@ -413,7 +414,7 @@ static int bridge_cb(void *data, struct qemu_io_msg *msg)
     default:
         break;
     }
-printf("%s done\n", __func__);
+
     return 0;
 }
 
