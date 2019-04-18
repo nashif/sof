@@ -315,7 +315,6 @@ static int byt_irq_thread(int irq, void *context)
 
 		/* read mailbox */
 		if ((ipcd & SOF_IPC_PANIC_MAGIC_MASK) == SOF_IPC_PANIC_MAGIC) {
-			printf("FW crash\n");
 			fuzzer_ipc_crash(fuzzer, BYT_PANIC_OFFSET(ipcd) +
 					  MBOX_OFFSET);
 		} else {

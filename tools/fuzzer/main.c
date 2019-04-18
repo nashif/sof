@@ -41,8 +41,55 @@
 #include "qemu-bridge.h"
 #include <uapi/ipc/trace.h>
 
+int enable_fuzzer;
+
 pthread_cond_t ipc_cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t ipc_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* tplg message types */
+uint32_t tplg_cmd_types[] = {SOF_IPC_TPLG_COMP_NEW,
+		       SOF_IPC_TPLG_COMP_FREE,
+		       SOF_IPC_TPLG_COMP_CONNECT,
+		       SOF_IPC_TPLG_PIPE_NEW,
+		       SOF_IPC_TPLG_PIPE_FREE,
+		       SOF_IPC_TPLG_PIPE_CONNECT,
+		       SOF_IPC_TPLG_PIPE_COMPLETE,
+		       SOF_IPC_TPLG_BUFFER_NEW,
+		       SOF_IPC_TPLG_BUFFER_FREE};
+
+/* PM message types */
+uint32_t pm_cmd_types[] = {SOF_IPC_PM_CTX_SAVE,
+			  SOF_IPC_PM_CTX_RESTORE,
+			  SOF_IPC_PM_CTX_SIZE,
+			  SOF_IPC_PM_CLK_SET,
+			  SOF_IPC_PM_CLK_GET,
+			  SOF_IPC_PM_CLK_REQ,
+			  SOF_IPC_PM_CORE_ENABLE};
+
+uint32_t comp_cmd_types[] = {SOF_IPC_COMP_SET_VALUE,
+			    SOF_IPC_COMP_GET_VALUE,
+			    SOF_IPC_COMP_SET_DATA,
+			    SOF_IPC_COMP_GET_DATA};
+
+
+uint32_t dai_cmd_types[] = {SOF_IPC_DAI_CONFIG,
+			   SOF_IPC_DAI_LOOPBACK};
+
+uint32_t stream_cmd_types[] = {SOF_IPC_STREAM_PCM_PARAMS,
+			    SOF_IPC_STREAM_PCM_PARAMS_REPLY,
+			    SOF_IPC_STREAM_PCM_FREE,
+			    SOF_IPC_STREAM_TRIG_START,
+			    SOF_IPC_STREAM_TRIG_STOP,
+			    SOF_IPC_STREAM_TRIG_PAUSE,
+			    SOF_IPC_STREAM_TRIG_RELEASE,
+			    SOF_IPC_STREAM_TRIG_DRAIN,
+			    SOF_IPC_STREAM_TRIG_XRUN,
+			    SOF_IPC_STREAM_POSITION,
+			    SOF_IPC_STREAM_VORBIS_PARAMS,
+			    SOF_IPC_STREAM_VORBIS_FREE};
+
+uint32_t trace_cmd_types[] = {SOF_IPC_TRACE_DMA_PARAMS,
+			     SOF_IPC_TRACE_DMA_POSITION};
 
 /* list of supported target platforms */
 static struct fuzz_platform *platform[] =
@@ -58,7 +105,7 @@ static void usage(char *name)
 	fprintf(stdout, "Usage 	%s -p platform <option(s)>\n", name);
 	fprintf(stdout, "		-t topology file\n");
 	fprintf(stdout, "		-p platform name\n");
-
+	fprintf(stdout, "		-f (enable ipc fuzzing (optional))\n");
 	fprintf(stdout, "		supported platforms: ");
 	for (i = 0; i < ARRAY_SIZE(platform); i++) {
 		fprintf(stdout, "%s ", platform[i]->name);
@@ -147,33 +194,38 @@ static void fuzz_ipc_cmd(uint32_t *cmd)
 {
 	/* currently there are 10 % global IPC commands */
 	uint32_t glb_cmd = rand() % 9 + 1;
-	uint32_t sub_cmd = rand() % 33 + 1;
+	uint32_t cmd_type = 0;
+	uint32_t count, index;
 
-	/* placeholder for more intelligent fuzzing based on global type */
-	switch (glb_cmd) {
-	case SOF_IPC_GLB_REPLY:
-		break;
-	case SOF_IPC_GLB_COMPOUND:
-		break;
+	switch (SOF_GLB_TYPE(glb_cmd)) {
 	case SOF_IPC_GLB_TPLG_MSG:
+		count = ARRAY_SIZE(tplg_cmd_types);
+		index = rand() % count;
+		cmd_type = tplg_cmd_types[index];
 		break;
 	case SOF_IPC_GLB_PM_MSG:
+		count = ARRAY_SIZE(pm_cmd_types);
+		index = rand() % count;
+		cmd_type = pm_cmd_types[index];
 		break;
 	case SOF_IPC_GLB_COMP_MSG:
+		count = ARRAY_SIZE(comp_cmd_types);
+		index = rand() % count;
+		cmd_type = comp_cmd_types[index];
 		break;
 	case SOF_IPC_GLB_STREAM_MSG:
-		break;
-	case SOF_IPC_FW_READY:
-		break;
-	case SOF_IPC_GLB_DAI_MSG:
-		break;
-	case SOF_IPC_GLB_TRACE_MSG:
+		count = ARRAY_SIZE(stream_cmd_types);
+		index = rand() % count;
+		cmd_type = stream_cmd_types[index];
 		break;
 	default:
 		break;
 	}
 
-	*cmd = SOF_GLB_TYPE(glb_cmd) | SOF_CMD_TYPE(sub_cmd);
+	printf("glb %x type %x\n", SOF_GLB_TYPE(glb_cmd), cmd_type);
+
+	if (cmd_type)
+		*cmd = SOF_GLB_TYPE(glb_cmd) | cmd_type;
 }
 
 static void fuzz_ipc(struct ipc_msg *msg)
@@ -250,6 +302,8 @@ void fuzzer_ipc_msg_reply(struct fuzz *fuzzer)
 void fuzzer_ipc_crash(struct fuzz *fuzzer, unsigned offset)
 {
 	/* TODO: DSP FW has crashed. dump stack, regs, last IPC, log etc */
+	fprintf(stderr, "DSP has crashed\n");
+	exit(EXIT_FAILURE);
 }
 
 /* TODO: this is hardcoded atm, needs to be able to send any message */
@@ -261,10 +315,10 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 
 	ipc_dump(&fuzzer->msg);
 
-	fuzz_ipc(&fuzzer->msg);
+	/* fuzz the ipc messages */
+	if (enable_fuzzer)
+		fuzz_ipc(&fuzzer->msg);
 
-	ipc_dump(&fuzzer->msg);
-#if 0
 	/* send msg */
 	ret = fuzzer->platform->send_msg(fuzzer, &fuzzer->msg);
 	if (ret < 0) {
@@ -290,7 +344,6 @@ int fuzzer_send_msg(struct fuzz *fuzzer)
 	}
 
 	pthread_mutex_unlock(&ipc_mutex);
-#endif
 
 	/*
 	 * sleep for 5 ms before continuing sending the next message.
@@ -314,13 +367,16 @@ int main(int argc, char *argv[])
 	int regions = 0;
 
 	/* parse arguments */
-	while ((opt = getopt(argc, argv, "ht:p:")) != -1) {
+	while ((opt = getopt(argc, argv, "ht:p:f")) != -1) {
 		switch (opt) {
 		case 't':
 			topology_file = optarg;
 			break;
 		case 'p':
 			platform_name = optarg;
+			break;
+		case 'f':
+			enable_fuzzer = 1;
 			break;
 		case 'h':
 			usage(argv[0]);
@@ -351,7 +407,6 @@ int main(int argc, char *argv[])
 	exit(EXIT_FAILURE);
 
 found:
-#if 0
 	ret = platform[i]->init(&fuzzer, platform[i]);
 	if (ret == ETIMEDOUT) {
 		fprintf(stderr, "error: platform %s failed to initialise\n",
@@ -360,7 +415,7 @@ found:
 	}
 
 	fprintf(stdout, "FW boot complete\n");
-#endif
+
 	/* initialize condition */
 	pthread_cond_init(&ipc_cond, NULL);
 
