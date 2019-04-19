@@ -38,6 +38,8 @@
 #include <string.h>
 #include "fuzzer.h"
 #include <uapi/ipc/topology.h>
+#include <uapi/ipc/stream.h>
+#include <uapi/ipc/control.h>
 #include "qemu-bridge.h"
 #include <uapi/ipc/trace.h>
 
@@ -167,6 +169,42 @@ void *fuzzer_create_memory_region(struct fuzz *fuzzer, int id, int idx)
 				id, err);
 
 	return ptr;
+}
+
+void send_volume_command(struct fuzz *fuzzer, int volume)
+{
+	struct sof_ipc_ctrl_data *cdata;
+	int i, ret;
+
+	cdata = (struct sof_ipc_ctrl_data *)
+		malloc(sizeof(struct sof_ipc_ctrl_data) +
+		2 * sizeof(struct sof_ipc_ctrl_value_comp));
+
+	cdata->num_elems = 2;
+	cdata->rhdr.hdr.cmd = SOF_IPC_GLB_COMP_MSG | SOF_IPC_COMP_SET_VALUE;
+	cdata->cmd = SOF_CTRL_CMD_VOLUME;
+	cdata->type = SOF_CTRL_TYPE_VALUE_CHAN_SET;
+	cdata->comp_id = 2;
+	cdata->rhdr.hdr.size = sizeof(struct sof_ipc_ctrl_data) +
+				2 * sizeof(struct sof_ipc_ctrl_value_comp);
+
+	for (i = 0; i < 2; i++) {
+		cdata->chanv[i].channel = i;
+		cdata->chanv[i].value = volume;
+	}
+
+	/* configure fuzzer msg */
+	fuzzer->msg.header = cdata->rhdr.hdr.cmd;
+	memcpy(fuzzer->msg.msg_data, cdata, cdata->rhdr.hdr.size);
+	fuzzer->msg.msg_size = cdata->rhdr.hdr.size;
+	fuzzer->msg.reply_size = cdata->rhdr.hdr.size;
+
+	/* load volume component */
+	ret = fuzzer_send_msg(fuzzer);
+	if (ret < 0)
+		fprintf(stderr, "error: message tx failed\n");
+
+	free(cdata);
 }
 
 /* frees all SHM and message queues */
@@ -363,7 +401,7 @@ int main(int argc, char *argv[])
 	char opt;
 	char *topology_file;
 	char *platform_name = NULL;
-	int i;
+	int i, j;
 	int regions = 0;
 
 	/* parse arguments */
@@ -427,6 +465,13 @@ found:
 	ret = parse_tplg(&fuzzer, "../topology/sof-byt-rt5651.tplg");
 	if (ret < 0)
 		exit(EXIT_FAILURE);
+
+	for (j = 0; j < 10000; j++) {
+		if (j % 2)
+			send_volume_command(&fuzzer, 1 << 16);
+		else
+			send_volume_command(&fuzzer, 0);
+	}
 
 	pthread_mutex_destroy(&ipc_mutex);
 	pthread_cond_destroy(&ipc_cond);
