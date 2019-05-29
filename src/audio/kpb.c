@@ -75,6 +75,8 @@ static void kpb_clear_history_buffer(struct hb *buff);
 static void kpb_free_history_buffer(struct hb *buff);
 static bool kpb_has_enough_history_data(struct comp_data *kpb,
 					    struct hb *buff, size_t his_req);
+static inline bool kpb_is_sample_width_supported(uint32_t sampling_width);
+
 
 /**
  * \brief Create a key phrase buffer component.
@@ -136,7 +138,7 @@ static struct comp_dev *kpb_new(struct sof_ipc_comp *comp)
 		return NULL;
 	}
 
-	if (cd->config.sampling_width != KPB_SAMPLING_WIDTH) {
+	if (!kpb_is_sample_width_supported(cd->config.sampling_width)) {
 		trace_kpb_error("kpb_new() error: "
 		"requested sampling width not supported");
 		return NULL;
@@ -935,6 +937,24 @@ static bool kpb_has_enough_history_data(struct comp_data *kpb,
 	}
 
 	return buffered_data >= his_req;
+}
+
+static inline bool kpb_is_sample_width_supported(uint32_t sampling_width)
+{
+	bool ret;
+
+	switch (sampling_width) {
+	case 16:
+		ret = true;
+		break;
+	case 24:
+		ret = true;
+		break;
+	default:
+		ret = false;
+	}
+
+	return ret;
 }
 
 struct comp_driver comp_kpb = {
